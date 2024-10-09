@@ -33,10 +33,11 @@
 import { computed, ref, watch } from 'vue';
 import AlertItem from './AlertItem.vue';
 import type { Alert } from '@/types/waterSystem';
+import { useWaterSystem } from '@/composables/water-system/useWaterSystem';
+import { waterSystemConfig } from '@/config/waterSystemConfig';
 
-const props = defineProps<{
-  alerts: Alert[];
-}>();
+// Utilisez le composable useWaterSystem
+const { alerts } = useWaterSystem();
 
 const priorities = ['high', 'medium', 'low'] as const;
 const itemsPerPage = 5;
@@ -47,28 +48,58 @@ const currentPage = ref({
   low: 1,
 });
 
-const filteredAlerts = computed(() => {
+function measureComputedPerformance<T>(name: string, computedFn: () => T): () => T {
+  return () => {
+    if (waterSystemConfig.enablePerformanceLogs) {
+      const startTime = performance.now();
+      const result = computedFn();
+      const endTime = performance.now();
+      console.log(`Performance de ${name}: ${endTime - startTime} ms`);
+      return result;
+    }
+    return computedFn();
+  };
+}
+
+// Modifiez filteredAlerts pour utiliser les alertes du composable
+const filteredAlerts = computed(measureComputedPerformance('filteredAlerts', () => {
   return priorities.reduce((acc, priority) => {
-    acc[priority] = props.alerts.filter(alert => alert.priority === priority);
+    acc[priority] = alerts.value.filter(alert => alert.priority === priority);
     return acc;
   }, {} as Record<typeof priorities[number], Alert[]>);
-});
+}));
 
-const totalPages = computed(() => {
+const totalPages = computed(measureComputedPerformance('totalPages', () => {
   return priorities.reduce((acc, priority) => {
     acc[priority] = Math.max(1, Math.ceil(filteredAlerts.value[priority].length / itemsPerPage));
     return acc;
   }, {} as Record<typeof priorities[number], number>);
-});
+}));
 
-const paginatedAlerts = computed(() => {
+const paginatedAlerts = computed(measureComputedPerformance('paginatedAlerts', () => {
   return priorities.reduce((acc, priority) => {
     const start = (currentPage.value[priority] - 1) * itemsPerPage;
     const end = start + itemsPerPage;
     acc[priority] = filteredAlerts.value[priority].slice(start, end);
     return acc;
   }, {} as Record<typeof priorities[number], Alert[]>);
-});
+}));
+
+// Modifiez le watcher pour surveiller alerts.value
+watch(() => alerts.value, () => {
+  if (waterSystemConfig.enablePerformanceLogs) {
+    const startTime = performance.now();
+    for (const priority of priorities) {
+      currentPage.value[priority] = 1;
+    }
+    const endTime = performance.now();
+    console.log(`Performance du watcher alerts: ${endTime - startTime} ms`);
+  } else {
+    for (const priority of priorities) {
+      currentPage.value[priority] = 1;
+    }
+  }
+}, { deep: true });
 
 const prevPage = (priority: typeof priorities[number]) => {
   if (currentPage.value[priority] > 1) {
@@ -96,11 +127,7 @@ const isRecentAlert = (alert: Alert) => {
   return now.getTime() - alertTime.getTime() < 5000; // 5 secondes
 };
 
-watch(() => props.alerts, () => {
-  for (const priority of priorities) {
-    currentPage.value[priority] = 1;
-  }
-}, { deep: true });
+// Supprimez le watcher obsolète qui faisait référence à props.alerts
 </script>
 
 <style scoped>

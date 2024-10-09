@@ -62,5 +62,7 @@ const {
   totalWaterProcessed,
   systemEfficiency,
   overallSystemStatus,
+  alerts,
+  addAlert,
 } = useWaterSystem();
 </script>

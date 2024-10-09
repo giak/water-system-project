@@ -1,5 +1,7 @@
 import type { Alert, DataSources, WaterSystemState, WeatherCondition } from '@/types/waterSystem';
+import { PriorityQueue } from '@datastructures-js/priority-queue';
 import { format } from 'date-fns';
+import { throttle } from 'lodash-es';
 import type { Observable } from 'rxjs';
 import { Subject, combineLatest, interval, merge, of } from 'rxjs';
 import {
@@ -13,11 +15,13 @@ import {
   shareReplay,
   take,
   takeUntil,
+  tap,
   throttleTime,
   withLatestFrom,
 } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { waterSystemConfig } from '@/config/waterSystemConfig';
 
 const MAX_ALERTS = 1000; // Nombre maximum d'alertes à conserver
 const DAILY_RESET_VALUE = 1000; // Valeur arbitraire, à ajuster selon les besoins
@@ -25,11 +29,118 @@ const DAILY_RESET_VALUE = 1000; // Valeur arbitraire, à ajuster selon les besoi
 // Définition d'un type pour les erreurs
 type WaterSystemError = Error | unknown;
 
+// Définissez alertQueue en dehors de la fonction useWaterSystem
+const alertQueue = new PriorityQueue<Alert>((a, b) => {
+  const priorityOrder = { high: 3, medium: 2, low: 1 };
+  if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+    return priorityOrder[b.priority] - priorityOrder[a.priority];
+  }
+  return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+});
+
+// Déplacez cette déclaration en dehors de useWaterSystem, juste après les imports
+const alertsChanged = ref(0);
+
 // Modification de la fonction utilitaire pour la gestion des erreurs
 function handleError(error: WaterSystemError, context: string): Observable<never> {
   console.error(`Erreur dans ${context}:`, error);
   // Vous pouvez ajouter ici une logique pour enregistrer l'erreur ou notifier l'utilisateur
   return of(); // Retourne un Observable vide pour continuer le flux
+}
+
+// Ajout de ces fonctions au début du fichier
+function getPerformanceNow(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+// Modifiez les fonctions de mesure de performance pour utiliser la configuration
+function measureObservablePerformance<T>(name: string) {
+  return tap<T>({
+    subscribe: () => {
+      if (waterSystemConfig.enablePerformanceLogs) console.time(`Subscribe ${name}`);
+    },
+    next: (value) => {
+      if (waterSystemConfig.enablePerformanceLogs) {
+        const endTime = performance.now();
+        logObservablePerformance(name, value, endTime - performance.now());
+      }
+    },
+    complete: () => {
+      if (waterSystemConfig.enablePerformanceLogs) console.timeEnd(`Subscribe ${name}`);
+    },
+  });
+}
+
+function logPerformance(name: string, startTime: number) {
+  if (waterSystemConfig.enablePerformanceLogs) {
+    const endTime = performance.now();
+    console.log(`Performance de ${name}: ${endTime - startTime} ms`);
+  }
+}
+
+// Ajout de cette fonction au début du fichier
+function logObservablePerformance(name: string, value: unknown, time: number) {
+  if (waterSystemConfig.enablePerformanceLogs) {
+    console.log(
+      `Observable ${name} - Temps: ${time.toFixed(2)}ms - Valeur: ${JSON.stringify(value)}`,
+    );
+  }
+}
+
+// Ajout de cette fonction au début du fichier
+function measureReactivePerformance<T>(name: string, fn: () => T): () => T {
+  return () => {
+    const startTime = performance.now();
+    const result = fn();
+    if (waterSystemConfig.enablePerformanceLogs) {
+      const endTime = performance.now();
+      console.log(`Performance de ${name}: ${endTime - startTime} ms`);
+    }
+    return result;
+  };
+}
+
+// Modifiez la fonction groupSimilarAlerts pour utiliser le type Alert correctement
+function groupSimilarAlerts(alert: Alert): Alert & { count?: number } {
+  const existingAlert = Array.from(alertQueue.toArray()).find(
+    (a) => a.priority === alert.priority && a.message === alert.message,
+  ) as (Alert & { count?: number }) | undefined;
+
+  if (existingAlert) {
+    existingAlert.count = (existingAlert.count || 1) + 1;
+    existingAlert.timestamp = alert.timestamp;
+    return existingAlert;
+  }
+
+  return { ...alert, count: 1 };
+}
+
+// Modifiez la fonction addAlert pour utiliser alertsChanged
+function addAlert(message: string, priority: Alert['priority']) {
+  const startTime = getPerformanceNow();
+  const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
+  const newAlert: Alert = {
+    id: uuidv4(),
+    message,
+    timestamp,
+    priority,
+  };
+
+  const groupedAlert = groupSimilarAlerts(newAlert);
+
+  if (groupedAlert.count === 1) {
+    alertQueue.enqueue(groupedAlert);
+    if (alertQueue.size() > MAX_ALERTS) {
+      alertQueue.dequeue();
+    }
+  }
+
+  // Émettre un événement pour signaler que les alertes ont changé
+  alertsChanged.value += 1;
+
+  logPerformance('addAlert', startTime);
 }
 
 export function useWaterSystem() {
@@ -52,14 +163,26 @@ export function useWaterSystem() {
   });
 
   // Ajout de valeurs calculées
-  const totalWaterProcessed = computed(() => {
+  const throttledTotalWaterProcessed = throttle(() => {
     return state.value.purifiedWater + state.value.waterDistributed;
-  });
+  }, 1000); // Calcul au maximum une fois par seconde
 
-  const systemEfficiency = computed(() => {
+  const totalWaterProcessed = computed(
+    waterSystemConfig.enablePerformanceLogs
+      ? measureReactivePerformance('totalWaterProcessed', throttledTotalWaterProcessed)
+      : throttledTotalWaterProcessed
+  );
+
+  const throttledSystemEfficiency = throttle(() => {
     if (totalWaterProcessed.value === 0) return 0;
     return (state.value.purifiedWater / totalWaterProcessed.value) * 100;
-  });
+  }, 1000);
+
+  const systemEfficiency = computed(
+    waterSystemConfig.enablePerformanceLogs
+      ? measureReactivePerformance('systemEfficiency', throttledSystemEfficiency)
+      : throttledSystemEfficiency
+  );
 
   const overallSystemStatus = computed(() => {
     if (state.value.waterLevel < 20 || state.value.waterQuality < 50) {
@@ -126,10 +249,16 @@ export function useWaterSystem() {
       let adjustedLevel = level + glacier.meltRate;
       if (weather === 'pluvieux') adjustedLevel *= 1.1;
       if (weather === 'orageux') adjustedLevel *= 1.3;
-      if (weather === 'ensoleillé') adjustedLevel *= 0.9; // Réduction en cas de beau temps
-      return Math.max(0, Math.min(adjustedLevel, 100)); // Assurons-nous que le niveau ne descend pas en dessous de 0
+      if (weather === 'ensoleillé') adjustedLevel *= 0.9;
+
+      // Ajoutez une variation aléatoire
+      const randomVariation = (Math.random() - 0.5) * 10; // Variation de ±5%
+      adjustedLevel += randomVariation;
+
+      return Math.max(0, Math.min(adjustedLevel, 100));
     }),
     catchError((error) => handleError(error, 'Calcul du niveau du barrage')),
+    measureObservablePerformance('dam$'),
     shareReplay(1),
   );
 
@@ -188,6 +317,7 @@ export function useWaterSystem() {
       if (weather === 'orageux') qualityScore *= 0.9; // La qualité diminue lors des orages
       return Math.max(0, Math.min(100, qualityScore));
     }),
+    measureObservablePerformance('waterQualityControl$'),
     shareReplay(1),
   );
 
@@ -218,7 +348,7 @@ export function useWaterSystem() {
     scan((acc, value) => acc + value, 0),
     // Limitons l'accumulation à une période donnée (par exemple, les dernières 24 heures)
     map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
-    shareReplay(1)
+    shareReplay(1),
   );
 
   // Ajustons la distribution d'eau en fonction du niveau d'eau
@@ -231,30 +361,8 @@ export function useWaterSystem() {
     scan((acc, value) => acc + value, 0),
     // Limitons également l'accumulation ici
     map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
-    shareReplay(1)
+    shareReplay(1),
   );
-
-  // Optimisons la gestion des alertes
-  const alerts = ref<Alert[]>([]);
-  function addAlert(message: string, priority: Alert['priority']) {
-    const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
-    const newAlert: Alert = {
-      id: uuidv4(),
-      message,
-      timestamp,
-      priority,
-    };
-
-    alerts.value = [newAlert, ...alerts.value]
-      .sort((a, b) => {
-        const priorityOrder = { high: 3, medium: 2, low: 1 };
-        if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-          return priorityOrder[b.priority] - priorityOrder[a.priority];
-        }
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      })
-      .slice(0, MAX_ALERTS);
-  }
 
   // Système de surveillance et d'alerte
   const alertSystem$ = merge(
@@ -346,19 +454,24 @@ export function useWaterSystem() {
   const sharedDam$ = dam$.pipe(
     distinctUntilChanged(),
     throttleTime(throttleInterval),
-    shareReplay(1)
+    measureObservablePerformance('sharedDam$'),
+    shareReplay({ bufferSize: 1, refCount: true }),
   );
+
+  const throttleIntervalLong = 10000; // 10 secondes
 
   const sharedWaterQualityControl$ = waterQualityControl$.pipe(
     distinctUntilChanged(),
-    throttleTime(throttleInterval),
-    shareReplay(1)
+    throttleTime(throttleIntervalLong),
+    measureObservablePerformance('sharedWaterQualityControl$'),
+    shareReplay({ bufferSize: 1, refCount: true }),
   );
 
   const sharedFloodPrediction$ = floodPrediction$.pipe(
     distinctUntilChanged(),
     throttleTime(throttleInterval),
-    shareReplay(1),
+    measureObservablePerformance('sharedFloodPrediction$'),
+    shareReplay({ bufferSize: 1, refCount: true }),
   );
 
   // Création d'un Subject pour la gestion du nettoyage
@@ -493,11 +606,13 @@ export function useWaterSystem() {
     if (simulationInterval) return;
     simulationInterval = window.setInterval(() => {
       if (state.value.isAutoMode) {
-        const baseWaterInput = 40 + (Math.random() * 40 - 20);
-        const seasonalFactor = 1 + 0.3 * Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 30));
+        const baseWaterInput = 40 + (Math.random() * 60 - 30); // Plus grande plage de variation
+        const seasonalFactor = 1 + 0.5 * Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 30)); // Effet saisonnier plus prononcé
         dataSources.waterSource$.next(baseWaterInput * seasonalFactor);
 
-        // Mise à jour du volume du glacier
+        // Mise à jour du volume du glacier avec une fonte variable
+        const glacierMeltRate = 0.00001 + Math.random() * 0.00009; // Taux de fonte variable
+        state.value.glacierVolume = Math.max(0, state.value.glacierVolume * (1 - glacierMeltRate));
         dataSources.glacierSource$.next(state.value.glacierVolume);
 
         // Forcer une mise à jour des autres valeurs
@@ -506,7 +621,7 @@ export function useWaterSystem() {
           dataSources.weatherSource$.next(weather);
         });
       }
-    }, 2000); // Augmenter l'intervalle à 2 secondes
+    }, 2000);
   }
 
   function stopSimulation() {
@@ -525,6 +640,13 @@ export function useWaterSystem() {
     destroy$.next();
     destroy$.complete();
     stopSimulation();
+  });
+
+  // Modifiez le computed pour les alertes
+  const alerts = computed(() => {
+    // Utilisez alertsChanged.value pour forcer la réévaluation
+    alertsChanged.value;
+    return Array.from(alertQueue.toArray());
   });
 
   return {

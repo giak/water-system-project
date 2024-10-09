@@ -1,20 +1,20 @@
 <template>
   <div class="glacier">
-    <h3>
+    <h3 v-once>
       <i class="pi pi-cloud mr-2"></i>
       Glacier
     </h3>
     <div class="glacier-info">
-      <div class="info-label">Volume de glace :</div>
+      <div class="info-label" v-once>Volume de glace :</div>
       <div class="info-value">
-        {{ glacierVolume.toFixed(2) }} m³
+        {{ formattedGlacierVolume }} m³
         <TrendArrow :trend="glacierVolumeTrend" />
       </div>
     </div>
     <div class="glacier-info">
-      <div class="info-label">Débit de fonte :</div>
+      <div class="info-label" v-once>Débit de fonte :</div>
       <div class="info-value">
-        {{ meltRate.toFixed(2) }} m³/h
+        {{ formattedMeltRate }} m³/h
         <TrendArrow :trend="meltRateTrend" />
       </div>
     </div>
@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import TrendArrow from './TrendArrow.vue';
 
 const props = defineProps<{
@@ -35,12 +35,15 @@ const previousMeltRate = ref(props.meltRate);
 const glacierVolumeTrend = ref(0);
 const meltRateTrend = ref(0);
 
+const formattedGlacierVolume = computed(() => props.glacierVolume.toFixed(2));
+const formattedMeltRate = computed(() => props.meltRate.toFixed(2));
+
 watch(
   () => props.glacierVolume,
   (newValue, oldValue) => {
     glacierVolumeTrend.value = newValue - oldValue;
     previousGlacierVolume.value = newValue;
-  },
+  }
 );
 
 watch(
@@ -48,6 +51,10 @@ watch(
   (newValue, oldValue) => {
     meltRateTrend.value = newValue - oldValue;
     previousMeltRate.value = newValue;
-  },
+  }
 );
 </script>
+
+<style scoped>
+/* Styles existants */
+</style>

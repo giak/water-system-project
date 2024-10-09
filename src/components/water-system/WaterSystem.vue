@@ -54,13 +54,13 @@ import WastewaterTreatmentComponent from './WastewaterTreatmentComponent.vue';
 import WaterQualityComponent from './WaterQualityComponent.vue';
 import WeatherStationComponent from './WeatherStationComponent.vue';
 
-const { 
-  state, 
-  resetSystem, 
-  setWaterLevel, 
-  toggleAutoMode, 
-  totalWaterProcessed, 
-  systemEfficiency, 
-  overallSystemStatus 
+const {
+  state,
+  resetSystem,
+  setWaterLevel,
+  toggleAutoMode,
+  totalWaterProcessed,
+  systemEfficiency,
+  overallSystemStatus,
 } = useWaterSystem();
 </script>

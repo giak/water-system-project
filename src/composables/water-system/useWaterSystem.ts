@@ -1,10 +1,26 @@
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
-import { Subject, interval, combineLatest, merge, of } from 'rxjs';
-import type { Observable, Subscription } from 'rxjs';
-import { map, filter, mergeMap, scan, shareReplay, take, withLatestFrom, distinctUntilChanged, debounceTime, takeUntil, catchError } from 'rxjs/operators';
+import type { Alert, DataSources, WaterSystemState, WeatherCondition } from '@/types/waterSystem';
 import { format } from 'date-fns';
+import type { Observable } from 'rxjs';
+import { Subject, combineLatest, interval, merge, of } from 'rxjs';
+import {
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  filter,
+  map,
+  mergeMap,
+  scan,
+  shareReplay,
+  take,
+  takeUntil,
+  throttleTime,
+  withLatestFrom,
+} from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
-import type { WaterSystemState, Alert, DataSources, WeatherCondition } from '@/types/waterSystem';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+
+const MAX_ALERTS = 1000; // Nombre maximum d'alertes à conserver
+const DAILY_RESET_VALUE = 1000; // Valeur arbitraire, à ajuster selon les besoins
 
 // Définition d'un type pour les erreurs
 type WaterSystemError = Error | unknown;
@@ -96,12 +112,16 @@ export function useWaterSystem() {
       dataSources.glacierSource$.next(newVolume);
       return { volume: newVolume, meltRate };
     }),
-    catchError(error => handleError(error, 'Simulation de fonte du glacier')),
-    shareReplay(1)
+    catchError((error) => handleError(error, 'Simulation de fonte du glacier')),
+    shareReplay(1),
   );
 
   // Modifions le barrage pour permettre des niveaux d'eau plus bas
-  const dam$ = combineLatest([dataSources.waterSource$, dataSources.weatherSource$, glacierMelt$]).pipe(
+  const dam$ = combineLatest([
+    dataSources.waterSource$,
+    dataSources.weatherSource$,
+    glacierMelt$,
+  ]).pipe(
     map(([level, weather, glacier]) => {
       let adjustedLevel = level + glacier.meltRate;
       if (weather === 'pluvieux') adjustedLevel *= 1.1;
@@ -109,8 +129,8 @@ export function useWaterSystem() {
       if (weather === 'ensoleillé') adjustedLevel *= 0.9; // Réduction en cas de beau temps
       return Math.max(0, Math.min(adjustedLevel, 100)); // Assurons-nous que le niveau ne descend pas en dessous de 0
     }),
-    catchError(error => handleError(error, 'Calcul du niveau du barrage')),
-    shareReplay(1)
+    catchError((error) => handleError(error, 'Calcul du niveau du barrage')),
+    shareReplay(1),
   );
 
   // Station de purification avec efficacité variable
@@ -168,7 +188,7 @@ export function useWaterSystem() {
       if (weather === 'orageux') qualityScore *= 0.9; // La qualité diminue lors des orages
       return Math.max(0, Math.min(100, qualityScore));
     }),
-    shareReplay(1)
+    shareReplay(1),
   );
 
   // Système de prévision des inondations
@@ -191,30 +211,31 @@ export function useWaterSystem() {
   ]).pipe(
     map(([consumption, quality, weather]) => {
       let adjustedConsumption = consumption;
-      if (quality < 50) adjustedConsumption *= 0.8; // Réduction si la qualité est mauvaise
-      if (weather === 'ensoleillé') adjustedConsumption *= 1.2; // Augmentation par temps chaud
+      if (quality < 50) adjustedConsumption *= 0.8;
+      if (weather === 'ensoleillé') adjustedConsumption *= 1.2;
       return adjustedConsumption;
     }),
     scan((acc, value) => acc + value, 0),
+    // Limitons l'accumulation à une période donnée (par exemple, les dernières 24 heures)
+    map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
+    shareReplay(1)
   );
 
   // Ajustons la distribution d'eau en fonction du niveau d'eau
   const waterDistribution$ = dam$.pipe(
     map((level) => {
-      if (level > 70) {
-        return level * 0.8; // Distribution effective
-      }
-      if (level > 30) {
-        return level * 0.5; // Distribution réduite
-      }
-      return level * 0.2; // Distribution minimale
+      if (level > 70) return level * 0.8;
+      if (level > 30) return level * 0.5;
+      return level * 0.2;
     }),
     scan((acc, value) => acc + value, 0),
+    // Limitons également l'accumulation ici
+    map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
+    shareReplay(1)
   );
 
-  const MAX_ALERTS = 10; // Nombre maximum d'alertes à conserver
-
-  // Fonction pour ajouter une alerte avec gestion de la priorité et limitation du nombre
+  // Optimisons la gestion des alertes
+  const alerts = ref<Alert[]>([]);
   function addAlert(message: string, priority: Alert['priority']) {
     const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
     const newAlert: Alert = {
@@ -224,22 +245,15 @@ export function useWaterSystem() {
       priority,
     };
 
-    // Ajouter la nouvelle alerte au début du tableau
-    state.value.alerts.unshift(newAlert);
-
-    // Trier les alertes par priorité (high > medium > low) et par timestamp (plus récent en premier)
-    state.value.alerts.sort((a, b) => {
-      const priorityOrder = { high: 3, medium: 2, low: 1 };
-      if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-        return priorityOrder[b.priority] - priorityOrder[a.priority];
-      }
-      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-    });
-
-    // Limiter le nombre d'alertes
-    if (state.value.alerts.length > MAX_ALERTS) {
-      state.value.alerts = state.value.alerts.slice(0, MAX_ALERTS);
-    }
+    alerts.value = [newAlert, ...alerts.value]
+      .sort((a, b) => {
+        const priorityOrder = { high: 3, medium: 2, low: 1 };
+        if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+          return priorityOrder[b.priority] - priorityOrder[a.priority];
+        }
+        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+      })
+      .slice(0, MAX_ALERTS);
   }
 
   // Système de surveillance et d'alerte
@@ -324,12 +338,33 @@ export function useWaterSystem() {
       filter((level) => level <= 30),
       map(() => ({ message: "Alerte : Distribution d'eau minimale !", priority: 'high' as const })),
     ),
-  ).pipe(
-    map(({ message, priority }) => addAlert(message, priority))
+  ).pipe(map(({ message, priority }) => addAlert(message, priority)));
+
+  // Optimisation des observables fréquemment utilisés
+  const throttleInterval = 2000; // 2 secondes
+
+  const sharedDam$ = dam$.pipe(
+    distinctUntilChanged(),
+    throttleTime(throttleInterval),
+    shareReplay(1)
   );
 
+  const sharedWaterQualityControl$ = waterQualityControl$.pipe(
+    distinctUntilChanged(),
+    throttleTime(throttleInterval),
+    shareReplay(1)
+  );
+
+  const sharedFloodPrediction$ = floodPrediction$.pipe(
+    distinctUntilChanged(),
+    throttleTime(throttleInterval),
+    shareReplay(1),
+  );
+
+  // Création d'un Subject pour la gestion du nettoyage
   const destroy$ = new Subject<void>();
 
+  // Modification de la fonction resetSystem pour utiliser les observables partagés
   function resetSystem() {
     // Arrêter toutes les simulations et souscriptions en cours
     stopSimulation();
@@ -373,12 +408,14 @@ export function useWaterSystem() {
 
     // Recréer toutes les souscriptions
     const subscriptions = [
-      dam$.pipe(
-        takeUntil(destroy$),
-        catchError(error => handleError(error, 'Souscription au niveau du barrage'))
-      ).subscribe((level) => {
-        state.value.waterLevel = level;
-      }),
+      sharedDam$
+        .pipe(
+          takeUntil(destroy$),
+          catchError((error) => handleError(error, 'Souscription au niveau du barrage')),
+        )
+        .subscribe((level) => {
+          state.value.waterLevel = level;
+        }),
 
       purificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
         state.value.purifiedWater += water;
@@ -396,11 +433,11 @@ export function useWaterSystem() {
         state.value.treatedWastewater = water;
       }),
 
-      waterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
+      sharedWaterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
         state.value.waterQuality = quality;
       }),
 
-      floodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
+      sharedFloodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
         state.value.floodRisk = risk;
       }),
 
@@ -469,7 +506,7 @@ export function useWaterSystem() {
           dataSources.weatherSource$.next(weather);
         });
       }
-    }, 500);
+    }, 2000); // Augmenter l'intervalle à 2 secondes
   }
 
   function stopSimulation() {
@@ -483,6 +520,7 @@ export function useWaterSystem() {
     resetSystem(); // Initialiser le système au montage
   });
 
+  // Modification de la fonction onUnmounted pour utiliser le Subject destroy$
   onUnmounted(() => {
     destroy$.next();
     destroy$.complete();
@@ -497,6 +535,7 @@ export function useWaterSystem() {
     totalWaterProcessed,
     systemEfficiency,
     overallSystemStatus,
-    addAlert, // Exposer la fonction addAlert pour une utilisation externe si nécessaire
+    alerts,
+    addAlert,
   };
 }

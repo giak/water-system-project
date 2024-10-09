@@ -1,12 +1,12 @@
 <template>
   <div class="dam">
-    <h3>
+    <h3 v-once>
       <i class="pi pi-shield mr-2"></i>
       Barrage
     </h3>
     <div class="water-level" :style="{ height: `${waterLevel}%` }"></div>
     <p class="water-level-info">
-      Niveau d'eau: {{ waterLevel.toFixed(2) }}%
+      Niveau d'eau: {{ formattedWaterLevel }}%
       <TrendArrow :trend="waterLevelTrend" />
     </p>
     <div class="dam-controls">
@@ -28,7 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import TrendArrow from './TrendArrow.vue';
 
 const props = defineProps<{
@@ -43,7 +43,19 @@ const emit = defineEmits<{
 }>();
 
 const localWaterLevel = ref(props.waterLevel);
+const previousWaterLevel = ref(props.waterLevel);
 const waterLevelTrend = ref(0);
+
+const formattedWaterLevel = computed(() => props.waterLevel.toFixed(2));
+
+watch(
+  () => props.waterLevel,
+  (newValue, oldValue) => {
+    localWaterLevel.value = newValue;
+    waterLevelTrend.value = newValue - oldValue;
+    previousWaterLevel.value = newValue;
+  },
+);
 
 const updateWaterLevel = () => {
   emit('update:waterLevel', localWaterLevel.value);
@@ -56,15 +68,4 @@ const toggleAutoMode = () => {
 const resetSystem = () => {
   emit('resetSystem');
 };
-
-watch(() => props.waterLevel, (newValue, oldValue) => {
-  localWaterLevel.value = newValue;
-  waterLevelTrend.value = newValue - oldValue;
-});
-
-watch(() => props.isAutoMode, (newValue) => {
-  if (newValue) {
-    localWaterLevel.value = props.waterLevel;
-  }
-});
 </script>

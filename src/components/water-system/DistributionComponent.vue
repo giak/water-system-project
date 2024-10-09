@@ -1,13 +1,13 @@
 <template>
   <div class="distribution" :class="distributionClass">
-    <h3>
+    <h3 v-once>
       <i class="pi pi-share-alt mr-2"></i>
       Distribution d'Eau
     </h3>
     <div class="distribution-info">
-      <div class="info-label">Eau distribuée :</div>
+      <div class="info-label" v-once>Eau distribuée :</div>
       <div class="info-value">
-        {{ displayedWaterDistributed }} m³
+        {{ formattedWaterDistributed }} m³
         <TrendArrow v-if="showTrend" :trend="waterDistributedTrend" />
       </div>
     </div>
@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import TrendArrow from './TrendArrow.vue';
 
 const props = defineProps<{
@@ -39,16 +39,19 @@ const isEffectiveDistribution = computed(() => props.waterLevel > 70);
 
 const showTrend = computed(() => !isLowWater.value);
 
+const formattedWaterDistributed = computed(() => props.waterDistributed.toFixed(2));
+
 const distributionClass = computed(() => {
   if (isLowWater.value) return 'low-water';
   if (isEffectiveDistribution.value) return 'effective-distribution';
   return '';
 });
 
-const displayedWaterDistributed = computed(() => props.waterDistributed.toFixed(2));
-
-watch(() => props.waterDistributed, (newValue, oldValue) => {
-  waterDistributedTrend.value = newValue - oldValue;
-  previousWaterDistributed.value = newValue;
-});
+watch(
+  () => props.waterDistributed,
+  (newValue, oldValue) => {
+    waterDistributedTrend.value = newValue - oldValue;
+    previousWaterDistributed.value = newValue;
+  },
+);
 </script>

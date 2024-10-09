@@ -1,6 +1,6 @@
 <template>
   <div class="weather-station">
-    <h3>
+    <h3 v-once>
       <i class="pi pi-sun mr-2"></i>
       Station Météo
     </h3>
@@ -12,20 +12,52 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import type { WeatherCondition } from '@/types/waterSystem';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
-  weatherCondition: string;
+  weatherCondition: WeatherCondition;
 }>();
 
 const previousWeather = ref(props.weatherCondition);
 const hasChanged = ref(false);
 
-const changeSymbol = computed(() => hasChanged.value ? '🔄' : '');
-const changeText = computed(() => hasChanged.value ? 'Conditions changées' : 'Conditions stables');
+const changeSymbol = computed(() => (hasChanged.value ? '🔄' : ''));
+const changeText = computed(() =>
+  hasChanged.value ? 'Conditions changées' : 'Conditions stables',
+);
 
-watch(() => props.weatherCondition, (newValue, oldValue) => {
-  hasChanged.value = newValue !== oldValue;
-  previousWeather.value = newValue;
+watch(
+  () => props.weatherCondition,
+  (newValue, oldValue) => {
+    hasChanged.value = newValue !== oldValue;
+    previousWeather.value = newValue;
+  },
+);
+
+const getWeatherIcon = computed(() => {
+  switch (props.weatherCondition) {
+    case 'ensoleillé':
+      return '☀️';
+    case 'nuageux':
+      return '☁️';
+    case 'pluvieux':
+      return '🌧️';
+    case 'orageux':
+      return '⛈️';
+    default:
+      return '❓';
+  }
+});
+
+const formattedWeatherCondition = computed(() => {
+  return `${getWeatherIcon.value} ${props.weatherCondition}`;
 });
 </script>
+
+<style scoped>
+.weather-change {
+  margin-left: 5px;
+  font-size: 1.2em;
+}
+</style>

@@ -1,17 +1,18 @@
 <template>
   <div class="alert-system">
-    <h3>
+    <h3 v-once>
       <i class="pi pi-bell mr-2"></i>
-      Système d'Alerte <span class="alert-count">({{ alerts.length }})</span>
+      Système d'Alerte
     </h3>
+    <p>Nombre d'alertes : {{ alerts.length }}</p>
     <div class="alert-columns">
       <div v-for="priority in priorities" :key="priority" :class="`alert-column ${priority}-priority`">
         <h4>{{ getPriorityLabel(priority) }}</h4>
         <div class="alert-container">
           <div class="pagination">
             <button @click="prevPage(priority)" :disabled="currentPage[priority] === 1">&lt; Précédent</button>
-            <span>Page {{ currentPage[priority] }} / {{ totalPages[priority] }}</span>
-            <button @click="nextPage(priority)" :disabled="currentPage[priority] === totalPages[priority]">Suivant &gt;</button>
+            <span>Page {{ currentPage[priority] }} / {{ Math.max(1, totalPages[priority]) }}</span>
+            <button @click="nextPage(priority)" :disabled="currentPage[priority] >= totalPages[priority]">Suivant &gt;</button>
           </div>
           <TransitionGroup name="alert-list">
             <AlertItem 
@@ -19,9 +20,9 @@
               :key="alert.id" 
               :alert="alert" 
               :is-recent="isRecentAlert(alert)"
-              v-memo="[alert.id, alert.message, alert.timestamp, alert.priority, isRecentAlert(alert)]"
             />
           </TransitionGroup>
+          <p v-if="paginatedAlerts[priority].length === 0">Aucune alerte pour cette priorité.</p>
         </div>
       </div>
     </div>
@@ -29,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watchEffect, shallowRef } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AlertItem from './AlertItem.vue';
 import type { Alert } from '@/types/waterSystem';
 
@@ -40,8 +41,7 @@ const props = defineProps<{
 const priorities = ['high', 'medium', 'low'] as const;
 const itemsPerPage = 5;
 
-// Utilisation de shallowRef pour currentPage
-const currentPage = shallowRef({
+const currentPage = ref({
   high: 1,
   medium: 1,
   low: 1,
@@ -56,7 +56,7 @@ const filteredAlerts = computed(() => {
 
 const totalPages = computed(() => {
   return priorities.reduce((acc, priority) => {
-    acc[priority] = Math.ceil(filteredAlerts.value[priority].length / itemsPerPage);
+    acc[priority] = Math.max(1, Math.ceil(filteredAlerts.value[priority].length / itemsPerPage));
     return acc;
   }, {} as Record<typeof priorities[number], number>);
 });
@@ -72,13 +72,13 @@ const paginatedAlerts = computed(() => {
 
 const prevPage = (priority: typeof priorities[number]) => {
   if (currentPage.value[priority] > 1) {
-    currentPage.value = { ...currentPage.value, [priority]: currentPage.value[priority] - 1 };
+    currentPage.value[priority]--;
   }
 };
 
 const nextPage = (priority: typeof priorities[number]) => {
   if (currentPage.value[priority] < totalPages.value[priority]) {
-    currentPage.value = { ...currentPage.value, [priority]: currentPage.value[priority] + 1 };
+    currentPage.value[priority]++;
   }
 };
 
@@ -96,15 +96,11 @@ const isRecentAlert = (alert: Alert) => {
   return now.getTime() - alertTime.getTime() < 5000; // 5 secondes
 };
 
-// Utiliser watchEffect pour réinitialiser les pages lorsque les alertes changent
-watchEffect(() => {
-  props.alerts; // Dépendance explicite
-  currentPage.value = {
-    high: 1,
-    medium: 1,
-    low: 1,
-  };
-});
+watch(() => props.alerts, () => {
+  for (const priority of priorities) {
+    currentPage.value[priority] = 1;
+  }
+}, { deep: true });
 </script>
 
 <style scoped>

@@ -1,0 +1,40 @@
+.alert-item {
+  padding: 5px;
+  margin-bottom: 5px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  transition: background-color 0.3s ease;
+
+  .alert-timestamp {
+    font-size: 0.8em;
+    color: #666;
+  }
+
+  .alert-message.bold {
+    font-weight: bold;
+  }
+
+  &.high {
+    background-color: #ffebee;
+    border-left: 3px solid #ff4500;
+  }
+
+  &.medium {
+    background-color: #fff3e0;
+    border-left: 3px solid #ffa500;
+  }
+
+  &.low {
+    background-color: #e8f5e9;
+    border-left: 3px solid #4caf50;
+  }
+
+  &.recent {
+    animation: fadeBackground 2s ease-in-out;
+  }
+}
+
+@keyframes fadeBackground {
+  0% { background-color: #ffff99; }
+  100% { background-color: inherit; }
+}

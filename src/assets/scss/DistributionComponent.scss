@@ -1,0 +1,36 @@
+.distribution {
+  padding: 10px;
+  border: 1px solid #4682b4;
+  border-radius: 5px;
+  background-color: #f0f8ff;
+  transition: background-color 0.3s ease;
+
+  display: flex;
+  flex-direction: column;
+
+  &.low-water {
+    background-color: #ffe4e1;
+    border-color: #ff6347;
+  }
+
+  &.effective-distribution {
+    background-color: #e6ffe6;
+    border-color: #4caf50;
+  }
+
+  .alert, .info {
+    margin-top: 10px; // Ajoute un espace au-dessus des alertes
+    word-break: break-word; // Permet aux longs mots de se couper
+    overflow-wrap: break-word; // Alternative pour une meilleure compatibilité
+  }
+
+  .alert {
+    color: #ff4500;
+    font-weight: bold;
+  }
+
+  .info {
+    color: #4caf50;
+    font-weight: bold;
+  }
+}

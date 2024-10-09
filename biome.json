@@ -1,0 +1,38 @@
+{
+    "organizeImports": {
+        "enabled": true
+    },
+    "formatter": {
+        "enabled": true,
+        "indentWidth": 2,
+        "lineWidth": 100,
+        "indentStyle": "space"
+    },
+    "javascript": {
+        "formatter": {
+            "arrowParentheses": "always",
+            "jsxQuoteStyle": "double",
+            "semicolons": "always",
+            "trailingCommas": "all",
+            "quoteProperties": "asNeeded",
+            "bracketSpacing": true,
+            "bracketSameLine": false,
+            "quoteStyle": "single"
+        }
+    },
+    "json": {
+        "formatter": {
+            "enabled": true,
+            "indentWidth": 4
+        },
+        "parser": {
+            "allowTrailingCommas": true
+        }
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true
+        }
+    }
+}

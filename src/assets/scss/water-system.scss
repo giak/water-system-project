@@ -1,0 +1,210 @@
+.water-system {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  grid-gap: 20px;
+  width: 100%; // Utilise toute la largeur disponible
+  height: 100vh; // Utilise toute la hauteur de la fenêtre
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #f0f8ff;
+  box-sizing: border-box; // Inclut le padding dans la largeur totale
+  
+  &__header {
+    grid-row: 1;
+    display: grid;
+    grid-template-rows: auto auto;
+    gap: 20px;
+    width: 100%; // Assure que l'en-tête occupe toute la largeur
+  }
+
+  &__title {
+    text-align: center;
+    color: #4682b4;
+    width: 100%; // Assure que le titre occupe toute la largeur
+  }
+  
+  &__controls {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 20px;
+    width: 100%; // Assure que les contrôles occupent toute la largeur
+  }
+  
+  &__slider {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    
+    input[type="range"] {
+      width: 100%;
+    }
+  }
+  
+  &__buttons {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    gap: 10px;
+  }
+  
+  &__components {
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    overflow-y: auto;
+    width: 100%;
+  }
+
+  &__alerts {
+    grid-row: 3;
+    width: 100%; // Assure que les alertes occupent toute la largeur
+  }
+}
+
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  
+  &--mode {
+    background-color: #4CAF50;
+    color: white;
+    
+    &:hover {
+      background-color: #45a049;
+    }
+  }
+  
+  &--reset {
+    background-color: #ff4500;
+    color: white;
+    
+    &:hover {
+      background-color: #ff6347;
+    }
+  }
+}
+
+.dam, .purification-plant, .power-plant, .distribution, .weather-station,
+.irrigation, .wastewater-treatment, .water-quality, .flood-prediction, .user-consumption {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-areas:
+    "dam plant power distribution"
+    "weather irrigation wastewater quality"
+    "flood user . .";
+  gap: 20px;
+  padding :10px;
+  border: 1px solid #4682b4;
+  border-radius: 8px;
+  background-color: white;
+  
+  h3 {
+    color: #4682b4;
+    margin-bottom: 10px;
+  }
+}
+
+.dam-component,
+.purification-plant-component,
+.power-plant-component,
+.distribution-component,
+.weather-station-component,
+.irrigation-component,
+.wastewater-treatment-component,
+.water-quality-component,
+.flood-prediction-component,
+.user-consumption-component {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+// Gardez les définitions de grid-area
+
+.dam-component { grid-area: dam; }
+.purification-plant-component { grid-area: plant; }
+.power-plant-component { grid-area: power; }
+.distribution-component { grid-area: distribution; }
+.weather-station-component { grid-area: weather; }
+.irrigation-component { grid-area: irrigation; }
+.wastewater-treatment-component { grid-area: wastewater; }
+.water-quality-component { grid-area: quality; }
+.flood-prediction-component { grid-area: flood; }
+.user-consumption-component { grid-area: user; }
+
+// Styles spécifiques pour le composant Dam
+.dam {
+  position: relative;
+  overflow: hidden;
+  height: 400px;
+  grid-column: span 2;
+  grid-row: span 2;
+  grid-column: span 2;
+  grid-row: span 2;
+
+  .water-level {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 0;
+    max-height: 100%;
+    background-image: linear-gradient(
+      to top,
+      hsl(201, 100%, 15%) 0%,
+      hsl(201, 100%, 25%) 25%,
+      hsl(201, 100%, 35%) 50%,
+      hsl(201, 100%, 45%) 75%,
+      hsl(201, 100%, 55%) 100%
+    );
+    background-size: 100% 200%;
+    transition: height 0.5s ease;
+  }
+
+  .water-level-info {
+    position: absolute;
+    top: 40px;
+    left: 10px;
+    background-color: rgba(255, 255, 255, 0.7);
+    padding: 5px;
+    border-radius: 5px;
+  }
+
+  .dam-controls {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: rgba(255, 255, 255, 0.7);
+    padding: 10px;
+    border-radius: 5px;
+
+    input[type="range"] {
+      flex-grow: 1;
+      margin-right: 10px;
+    }
+  }
+}
+
+.component-content {
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (max-width: 768px) {
+  .water-system {
+    &__components {
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+  }
+}
+

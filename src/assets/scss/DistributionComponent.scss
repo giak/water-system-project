@@ -4,9 +4,8 @@
   border-radius: 5px;
   background-color: #f0f8ff;
   transition: background-color 0.3s ease;
-
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  min-height: 120px; // Ajustez cette valeur selon vos besoins
 
   &.low-water {
     background-color: #ffe4e1;
@@ -18,18 +17,32 @@
     border-color: #4caf50;
   }
 
+  h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+  }
+
+  p {
+    margin: 5px 0;
+  }
+
   .alert, .info {
-    margin-top: 10px; // Ajoute un espace au-dessus des alertes
-    word-break: break-word; // Permet aux longs mots de se couper
-    overflow-wrap: break-word; // Alternative pour une meilleure compatibilité
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    padding: 5px;
+    border-radius: 3px;
   }
 
   .alert {
+    background-color: rgba(255, 69, 0, 0.1);
     color: #ff4500;
     font-weight: bold;
   }
 
   .info {
+    background-color: rgba(76, 175, 80, 0.1);
     color: #4caf50;
     font-weight: bold;
   }

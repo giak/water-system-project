@@ -8,7 +8,7 @@
     <p v-if="isLowWater" class="alert">
       ⚠️ Niveau d'eau critique ! Distribution limitée.
     </p>
-    <p v-if="isEffectiveDistribution" class="info">
+    <p v-else-if="isEffectiveDistribution" class="info">
       ✅ Distribution d'eau effective.
     </p>
   </div>
@@ -28,7 +28,6 @@ const waterDistributedTrend = ref(0);
 
 const isLowWater = computed(() => props.waterLevel < 30);
 const isEffectiveDistribution = computed(() => props.waterLevel > 70);
-const isNormalDistribution = computed(() => props.waterLevel >= 30 && props.waterLevel <= 70);
 
 const showTrend = computed(() => !isLowWater.value);
 
@@ -38,15 +37,10 @@ const distributionClass = computed(() => {
   return '';
 });
 
-const displayedWaterDistributed = computed(() => {
-  if (isLowWater.value) return '0.00';
-  return props.waterDistributed.toFixed(2);
-});
+const displayedWaterDistributed = computed(() => props.waterDistributed.toFixed(2));
 
 watch(() => props.waterDistributed, (newValue, oldValue) => {
-  if (!isNormalDistribution.value) {
-    waterDistributedTrend.value = newValue - oldValue;
-    previousWaterDistributed.value = newValue;
-  }
+  waterDistributedTrend.value = newValue - oldValue;
+  previousWaterDistributed.value = newValue;
 });
 </script>

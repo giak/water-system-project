@@ -12,7 +12,7 @@
         min="0"
         max="100"
         step="1"
-        v-model="localWaterLevel"
+        v-model.number="localWaterLevel"
         @input="updateWaterLevel"
         :disabled="isAutoMode"
       >

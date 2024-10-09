@@ -2,30 +2,39 @@
   <div class="water-system">
     <div class="water-system__header">
       <h2 class="water-system__title">Système de Gestion de l'Eau Avancé</h2>
+      <div class="water-system__status">
+        <p>Statut global : {{ overallSystemStatus }}</p>
+        <p>Efficacité du système : {{ systemEfficiency.toFixed(2) }}%</p>
+        <p>Total d'eau traitée : {{ totalWaterProcessed.toFixed(2) }} m³</p>
+      </div>
     </div>
     <div class="water-system__components">
-      <GlacierComponent :glacier-volume="glacierVolume" :melt-rate="meltRate" />
+      <GlacierComponent 
+        :glacier-volume="state.glacierVolume" 
+        :melt-rate="state.meltRate" 
+      />
       <DamComponent 
-        :water-level="waterLevel" 
-        :is-auto-mode="isAutoMode"
+        :water-level="state.waterLevel" 
+        :is-auto-mode="state.isAutoMode"
         @update:water-level="setWaterLevel"
         @toggle-auto-mode="toggleAutoMode"
         @reset-system="resetSystem"
       />
-
-      <PurificationPlantComponent :purified-water="purifiedWater" />
-      <PowerPlantComponent :power-generated="powerGenerated" />
-      <DistributionComponent :water-distributed="waterDistributed" :water-level="waterLevel" />
-      <WeatherStationComponent :weather-condition="weatherCondition" />
-      <IrrigationComponent :irrigation-water="irrigationWater" />
-      <WastewaterTreatmentComponent :treated-wastewater="treatedWastewater" />
-      <WaterQualityComponent :water-quality="waterQuality" />
-      <FloodPredictionComponent :flood-risk="floodRisk" />
-      <UserConsumptionComponent :user-consumption="userConsumption" />
-      
+      <PurificationPlantComponent :purified-water="state.purifiedWater" />
+      <PowerPlantComponent :power-generated="state.powerGenerated" />
+      <DistributionComponent 
+        :water-distributed="state.waterDistributed" 
+        :water-level="state.waterLevel" 
+      />
+      <WeatherStationComponent :weather-condition="state.weatherCondition" />
+      <IrrigationComponent :irrigation-water="state.irrigationWater" />
+      <WastewaterTreatmentComponent :treated-wastewater="state.treatedWastewater" />
+      <WaterQualityComponent :water-quality="state.waterQuality" />
+      <FloodPredictionComponent :flood-risk="state.floodRisk" />
+      <UserConsumptionComponent :user-consumption="state.userConsumption" />
     </div>
     <div class="water-system__alerts">
-      <AlertSystem :alerts="alerts" />
+      <AlertSystem :alerts="state.alerts" />
     </div>
   </div>
 </template>
@@ -45,23 +54,13 @@ import WastewaterTreatmentComponent from './WastewaterTreatmentComponent.vue';
 import WaterQualityComponent from './WaterQualityComponent.vue';
 import WeatherStationComponent from './WeatherStationComponent.vue';
 
-const {
-  waterLevel,
-  setWaterLevel,
-  isAutoMode,
-  toggleAutoMode,
-  purifiedWater,
-  powerGenerated,
-  waterDistributed,
-  weatherCondition,
-  alerts,
-  irrigationWater,
-  treatedWastewater,
-  waterQuality,
-  floodRisk,
-  userConsumption,
-  resetSystem,
-  glacierVolume,
-  meltRate,
+const { 
+  state, 
+  resetSystem, 
+  setWaterLevel, 
+  toggleAutoMode, 
+  totalWaterProcessed, 
+  systemEfficiency, 
+  overallSystemStatus 
 } = useWaterSystem();
 </script>

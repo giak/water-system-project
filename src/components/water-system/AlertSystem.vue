@@ -5,99 +5,116 @@
       Système d'Alerte <span class="alert-count">({{ alerts.length }})</span>
     </h3>
     <div class="alert-columns">
-      <div v-for="priority in ['high', 'medium', 'low']" :key="priority" :class="`alert-column ${priority}-priority`">
+      <div v-for="priority in priorities" :key="priority" :class="`alert-column ${priority}-priority`">
         <h4>{{ getPriorityLabel(priority) }}</h4>
         <div class="alert-container">
           <div class="pagination">
-          <button @click="prevPage(priority)" :disabled="currentPage[priority] === 1">&lt; Précédent</button>
-          <span>Page {{ currentPage[priority] }} / {{ totalPages(priority) }}</span>
-          <button @click="nextPage(priority)" :disabled="currentPage[priority] === totalPages(priority)">Suivant &gt;</button>
+            <button @click="prevPage(priority)" :disabled="currentPage[priority] === 1">&lt; Précédent</button>
+            <span>Page {{ currentPage[priority] }} / {{ totalPages[priority] }}</span>
+            <button @click="nextPage(priority)" :disabled="currentPage[priority] === totalPages[priority]">Suivant &gt;</button>
+          </div>
+          <TransitionGroup name="alert-list">
+            <AlertItem 
+              v-for="alert in paginatedAlerts[priority]" 
+              :key="alert.id" 
+              :alert="alert" 
+              :is-recent="isRecentAlert(alert)"
+              v-memo="[alert.id, alert.message, alert.timestamp, alert.priority, isRecentAlert(alert)]"
+            />
+          </TransitionGroup>
         </div>
-          <AlertItem 
-            v-for="alert in paginatedAlerts(priority)" 
-            :key="alert.id" 
-            :alert="alert" 
-            :is-recent="isRecentAlert(alert)" 
-          />
-        </div>
-    
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineProps, ref } from 'vue';
+import { computed, ref, watchEffect, shallowRef } from 'vue';
 import AlertItem from './AlertItem.vue';
-
-interface Alert {
-  id: string;
-  message: string;
-  timestamp: string;
-  priority: 'high' | 'medium' | 'low';
-}
+import type { Alert } from '@/types/waterSystem';
 
 const props = defineProps<{
   alerts: Alert[];
 }>();
 
+const priorities = ['high', 'medium', 'low'] as const;
 const itemsPerPage = 5;
-const currentPage = ref({
+
+// Utilisation de shallowRef pour currentPage
+const currentPage = shallowRef({
   high: 1,
   medium: 1,
   low: 1,
 });
 
-const sortAlerts = (alerts: Alert[]) => {
-  return [...alerts].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  );
-};
+const filteredAlerts = computed(() => {
+  return priorities.reduce((acc, priority) => {
+    acc[priority] = props.alerts.filter(alert => alert.priority === priority);
+    return acc;
+  }, {} as Record<typeof priorities[number], Alert[]>);
+});
 
-const filteredAlerts = computed(() => ({
-  high: sortAlerts(props.alerts.filter((alert) => alert.priority === 'high')),
-  medium: sortAlerts(props.alerts.filter((alert) => alert.priority === 'medium')),
-  low: sortAlerts(props.alerts.filter((alert) => alert.priority === 'low')),
-}));
+const totalPages = computed(() => {
+  return priorities.reduce((acc, priority) => {
+    acc[priority] = Math.ceil(filteredAlerts.value[priority].length / itemsPerPage);
+    return acc;
+  }, {} as Record<typeof priorities[number], number>);
+});
 
-const totalPages = (priority: string) =>
-  Math.ceil(filteredAlerts.value[priority].length / itemsPerPage);
+const paginatedAlerts = computed(() => {
+  return priorities.reduce((acc, priority) => {
+    const start = (currentPage.value[priority] - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    acc[priority] = filteredAlerts.value[priority].slice(start, end);
+    return acc;
+  }, {} as Record<typeof priorities[number], Alert[]>);
+});
 
-const paginatedAlerts = (priority: string) => {
-  const start = (currentPage.value[priority] - 1) * itemsPerPage;
-  const end = start + itemsPerPage;
-  return filteredAlerts.value[priority].slice(start, end);
-};
-
-const nextPage = (priority: string) => {
-  if (currentPage.value[priority] < totalPages(priority)) {
-    currentPage.value[priority]++;
+const prevPage = (priority: typeof priorities[number]) => {
+  if (currentPage.value[priority] > 1) {
+    currentPage.value = { ...currentPage.value, [priority]: currentPage.value[priority] - 1 };
   }
 };
 
-const prevPage = (priority: string) => {
-  if (currentPage.value[priority] > 1) {
-    currentPage.value[priority]--;
+const nextPage = (priority: typeof priorities[number]) => {
+  if (currentPage.value[priority] < totalPages.value[priority]) {
+    currentPage.value = { ...currentPage.value, [priority]: currentPage.value[priority] + 1 };
+  }
+};
+
+const getPriorityLabel = (priority: typeof priorities[number]) => {
+  switch (priority) {
+    case 'high': return 'Haute priorité';
+    case 'medium': return 'Priorité moyenne';
+    case 'low': return 'Basse priorité';
   }
 };
 
 const isRecentAlert = (alert: Alert) => {
-  const alertTime = new Date(alert.timestamp).getTime();
-  const currentTime = new Date().getTime();
-  const fiveMinutesAgo = currentTime - 5 * 60 * 1000;
-  return alertTime > fiveMinutesAgo;
+  const now = new Date();
+  const alertTime = new Date(alert.timestamp);
+  return now.getTime() - alertTime.getTime() < 5000; // 5 secondes
 };
 
-const getPriorityLabel = (priority: string) => {
-  switch (priority) {
-    case 'high':
-      return 'Priorité Haute';
-    case 'medium':
-      return 'Priorité Moyenne';
-    case 'low':
-      return 'Priorité Basse';
-    default:
-      return '';
-  }
-};
+// Utiliser watchEffect pour réinitialiser les pages lorsque les alertes changent
+watchEffect(() => {
+  props.alerts; // Dépendance explicite
+  currentPage.value = {
+    high: 1,
+    medium: 1,
+    low: 1,
+  };
+});
 </script>
+
+<style scoped>
+.alert-list-enter-active,
+.alert-list-leave-active {
+  transition: all 0.5s ease;
+}
+.alert-list-enter-from,
+.alert-list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+</style>

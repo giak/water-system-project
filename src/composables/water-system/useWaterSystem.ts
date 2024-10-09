@@ -1,62 +1,81 @@
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { Subject, interval, combineLatest, merge, of } from 'rxjs';
+import type { Observable, Subscription } from 'rxjs';
+import { map, filter, mergeMap, scan, shareReplay, take, withLatestFrom, distinctUntilChanged, debounceTime, takeUntil, catchError } from 'rxjs/operators';
 import { format } from 'date-fns';
-import { Subject, combineLatest, interval, merge } from 'rxjs';
-import {
-  debounceTime,
-  distinctUntilChanged,
-  filter,
-  map,
-  mergeMap,
-  scan,
-  share,
-  take,
-  withLatestFrom,
-} from 'rxjs/operators';
-import { v4 as uuidv4 } from 'uuid'; // Assurez-vous d'installer et d'importer uuid
-import { nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { v4 as uuidv4 } from 'uuid';
+import type { WaterSystemState, Alert, DataSources, WeatherCondition } from '@/types/waterSystem';
 
-interface Alert {
-  id: string; // Ajout d'un id unique
-  message: string;
-  timestamp: string;
-  priority: 'high' | 'medium' | 'low';
+// Définition d'un type pour les erreurs
+type WaterSystemError = Error | unknown;
+
+// Modification de la fonction utilitaire pour la gestion des erreurs
+function handleError(error: WaterSystemError, context: string): Observable<never> {
+  console.error(`Erreur dans ${context}:`, error);
+  // Vous pouvez ajouter ici une logique pour enregistrer l'erreur ou notifier l'utilisateur
+  return of(); // Retourne un Observable vide pour continuer le flux
 }
 
 export function useWaterSystem() {
   // États réactifs
-  const waterLevel = ref(50); // Commencer avec un niveau d'eau moyen
-  const purifiedWater = ref(0);
-  const powerGenerated = ref(0);
-  const waterDistributed = ref(0);
-  const weatherCondition = ref('ensoleillé');
-  const alerts = ref<Alert[]>([]);
-  const irrigationWater = ref(0);
-  const treatedWastewater = ref(0);
-  const waterQuality = ref(90); // Commencer avec une bonne qualité d'eau
-  const floodRisk = ref(10); // Risque initial faible
-  const userConsumption = ref(0);
-  const isAutoMode = ref(true);
-  const glacierVolume = ref(1000000); // Volume initial du glacier en m³
-  const meltRate = ref(0); // Taux de fonte en m³/h
+  const state = ref<WaterSystemState>({
+    waterLevel: 50,
+    purifiedWater: 0,
+    powerGenerated: 0,
+    waterDistributed: 0,
+    weatherCondition: 'ensoleillé',
+    alerts: [],
+    irrigationWater: 0,
+    treatedWastewater: 0,
+    waterQuality: 90,
+    floodRisk: 10,
+    userConsumption: 0,
+    isAutoMode: true,
+    glacierVolume: 1000000,
+    meltRate: 0,
+  });
+
+  // Ajout de valeurs calculées
+  const totalWaterProcessed = computed(() => {
+    return state.value.purifiedWater + state.value.waterDistributed;
+  });
+
+  const systemEfficiency = computed(() => {
+    if (totalWaterProcessed.value === 0) return 0;
+    return (state.value.purifiedWater / totalWaterProcessed.value) * 100;
+  });
+
+  const overallSystemStatus = computed(() => {
+    if (state.value.waterLevel < 20 || state.value.waterQuality < 50) {
+      return 'Critique';
+    }
+    if (state.value.waterLevel < 40 || state.value.waterQuality < 70) {
+      return 'Préoccupant';
+    }
+    return 'Normal';
+  });
 
   // Sources de données
-  const waterSource$ = new Subject<number>();
-  const weatherSource$ = new Subject<string>();
-  const wastewaterSource$ = new Subject<number>();
-  const userConsumptionSource$ = new Subject<number>();
-  const glacierSource$ = new Subject<number>();
+  const dataSources: DataSources = {
+    waterSource$: new Subject<number>(),
+    weatherSource$: new Subject<WeatherCondition>(),
+    wastewaterSource$: new Subject<number>(),
+    userConsumptionSource$: new Subject<number>(),
+    glacierSource$: new Subject<number>(),
+  };
 
   // Simulation des conditions météorologiques
-  const weatherSimulation$ = interval(10000).pipe(
+  const weatherSimulation$: Observable<WeatherCondition> = interval(10000).pipe(
     map(() => {
-      const conditions = ['ensoleillé', 'nuageux', 'pluvieux', 'orageux'];
+      const conditions: WeatherCondition[] = ['ensoleillé', 'nuageux', 'pluvieux', 'orageux'];
       const randomIndex = Math.floor(Math.random() * conditions.length);
       return conditions[randomIndex];
     }),
   );
 
   // Modifions la simulation de la fonte du glacier
-  const glacierMelt$ = combineLatest([interval(1000), weatherSource$]).pipe(
-    withLatestFrom(glacierSource$),
+  const glacierMelt$ = combineLatest([interval(1000), dataSources.weatherSource$]).pipe(
+    withLatestFrom(dataSources.glacierSource$),
     map(([[, weather], volume]) => {
       let meltRate = 0;
       switch (weather) {
@@ -74,14 +93,15 @@ export function useWaterSystem() {
           break;
       }
       const newVolume = Math.max(0, volume - meltRate);
-      glacierSource$.next(newVolume);
+      dataSources.glacierSource$.next(newVolume);
       return { volume: newVolume, meltRate };
     }),
-    share(),
+    catchError(error => handleError(error, 'Simulation de fonte du glacier')),
+    shareReplay(1)
   );
 
   // Modifions le barrage pour permettre des niveaux d'eau plus bas
-  const dam$ = combineLatest([waterSource$, weatherSource$, glacierMelt$]).pipe(
+  const dam$ = combineLatest([dataSources.waterSource$, dataSources.weatherSource$, glacierMelt$]).pipe(
     map(([level, weather, glacier]) => {
       let adjustedLevel = level + glacier.meltRate;
       if (weather === 'pluvieux') adjustedLevel *= 1.1;
@@ -89,7 +109,8 @@ export function useWaterSystem() {
       if (weather === 'ensoleillé') adjustedLevel *= 0.9; // Réduction en cas de beau temps
       return Math.max(0, Math.min(adjustedLevel, 100)); // Assurons-nous que le niveau ne descend pas en dessous de 0
     }),
-    share(),
+    catchError(error => handleError(error, 'Calcul du niveau du barrage')),
+    shareReplay(1)
   );
 
   // Station de purification avec efficacité variable
@@ -117,7 +138,7 @@ export function useWaterSystem() {
   );
 
   // Système d'irrigation influencé par la météo
-  const irrigation$ = combineLatest([purificationPlant$, weatherSource$]).pipe(
+  const irrigation$ = combineLatest([purificationPlant$, dataSources.weatherSource$]).pipe(
     map(([water, weather]) => {
       let irrigationNeed = water * 0.3;
       if (weather === 'ensoleillé') irrigationNeed *= 1.2;
@@ -128,7 +149,7 @@ export function useWaterSystem() {
   );
 
   // Traitement des eaux usées avec efficacité variable
-  const wastewaterTreatment$ = wastewaterSource$.pipe(
+  const wastewaterTreatment$ = dataSources.wastewaterSource$.pipe(
     map((wastewater) => {
       const efficiency = 0.6 + Math.random() * 0.3; // Efficacité entre 60% et 90%
       return wastewater * efficiency;
@@ -140,17 +161,18 @@ export function useWaterSystem() {
   const waterQualityControl$ = combineLatest([
     purificationPlant$,
     wastewaterTreatment$,
-    weatherSource$,
+    dataSources.weatherSource$,
   ]).pipe(
     map(([purified, treated, weather]) => {
       let qualityScore = (purified / (purified + treated)) * 100;
       if (weather === 'orageux') qualityScore *= 0.9; // La qualité diminue lors des orages
       return Math.max(0, Math.min(100, qualityScore));
     }),
+    shareReplay(1)
   );
 
-  // Syst��me de prvision des inondations
-  const floodPrediction$ = combineLatest([dam$, weatherSource$]).pipe(
+  // Système de prévision des inondations
+  const floodPrediction$ = combineLatest([dam$, dataSources.weatherSource$]).pipe(
     map(([waterLevel, weather]) => {
       let risk = 0;
       if (weather === 'pluvieux') risk += 20;
@@ -163,9 +185,9 @@ export function useWaterSystem() {
 
   // Gestion de la consommation d'eau des utilisateurs
   const userWaterManagement$ = combineLatest([
-    userConsumptionSource$,
+    dataSources.userConsumptionSource$,
     waterQualityControl$,
-    weatherSource$,
+    dataSources.weatherSource$,
   ]).pipe(
     map(([consumption, quality, weather]) => {
       let adjustedConsumption = consumption;
@@ -181,14 +203,44 @@ export function useWaterSystem() {
     map((level) => {
       if (level > 70) {
         return level * 0.8; // Distribution effective
-      } else if (level > 30) {
-        return level * 0.5; // Distribution réduite
-      } else {
-        return level * 0.2; // Distribution minimale
       }
+      if (level > 30) {
+        return level * 0.5; // Distribution réduite
+      }
+      return level * 0.2; // Distribution minimale
     }),
     scan((acc, value) => acc + value, 0),
   );
+
+  const MAX_ALERTS = 10; // Nombre maximum d'alertes à conserver
+
+  // Fonction pour ajouter une alerte avec gestion de la priorité et limitation du nombre
+  function addAlert(message: string, priority: Alert['priority']) {
+    const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
+    const newAlert: Alert = {
+      id: uuidv4(),
+      message,
+      timestamp,
+      priority,
+    };
+
+    // Ajouter la nouvelle alerte au début du tableau
+    state.value.alerts.unshift(newAlert);
+
+    // Trier les alertes par priorité (high > medium > low) et par timestamp (plus récent en premier)
+    state.value.alerts.sort((a, b) => {
+      const priorityOrder = { high: 3, medium: 2, low: 1 };
+      if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+        return priorityOrder[b.priority] - priorityOrder[a.priority];
+      }
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
+
+    // Limiter le nombre d'alertes
+    if (state.value.alerts.length > MAX_ALERTS) {
+      state.value.alerts = state.value.alerts.slice(0, MAX_ALERTS);
+    }
+  }
 
   // Système de surveillance et d'alerte
   const alertSystem$ = merge(
@@ -200,28 +252,30 @@ export function useWaterSystem() {
             message: 'Alerte : Niveau du barrage critique! (90%+)',
             priority: 'high' as const,
           };
-        } else if (level >= 80) {
+        }
+        if (level >= 80) {
           return {
             message: 'Avertissement : Niveau du barrage élevé (80%+)',
             priority: 'medium' as const,
           };
-        } else if (level <= 20) {
+        }
+        if (level <= 20) {
           return {
             message: 'Alerte : Niveau du barrage très bas! (20% ou moins)',
             priority: 'high' as const,
           };
-        } else if (level <= 30) {
+        }
+        if (level <= 30) {
           return {
             message: 'Avertissement : Niveau du barrage bas (30% ou moins)',
             priority: 'medium' as const,
           };
-        } else {
-          return null;
         }
+        return null;
       }),
       filter((alert): alert is Exclude<typeof alert, null> => alert !== null),
     ),
-    weatherSource$.pipe(
+    dataSources.weatherSource$.pipe(
       filter((condition) => condition === 'orageux'),
       map(() => ({
         message: 'Alerte : Conditions météorologiques dangereuses!',
@@ -233,7 +287,7 @@ export function useWaterSystem() {
       filter((total) => total < 100),
       debounceTime(5000),
       map(() => ({
-        message: "Alerte : Production d'eau purifiée faible!",
+        message: "Alerte : Production d'eau purifie faible!",
         priority: 'medium' as const,
       })),
     ),
@@ -270,94 +324,104 @@ export function useWaterSystem() {
       filter((level) => level <= 30),
       map(() => ({ message: "Alerte : Distribution d'eau minimale !", priority: 'high' as const })),
     ),
+  ).pipe(
+    map(({ message, priority }) => addAlert(message, priority))
   );
 
-  let subscriptions: any[] = [];
+  const destroy$ = new Subject<void>();
 
   function resetSystem() {
     // Arrêter toutes les simulations et souscriptions en cours
     stopSimulation();
-    subscriptions.forEach((sub) => sub.unsubscribe());
-    subscriptions = [];
+    destroy$.next();
+    destroy$.complete();
 
     // Réinitialiser tous les états réactifs à leurs valeurs initiales
-    waterLevel.value = 50;
-    purifiedWater.value = 0;
-    powerGenerated.value = 0;
-    waterDistributed.value = 0;
-    weatherCondition.value = 'ensoleillé';
-    alerts.value = [];
-    irrigationWater.value = 0;
-    treatedWastewater.value = 0;
-    waterQuality.value = 90;
-    floodRisk.value = 10;
-    userConsumption.value = 0;
-    glacierVolume.value = 1000000;
-    meltRate.value = 0;
-    isAutoMode.value = true;
+    state.value = {
+      waterLevel: 50,
+      purifiedWater: 0,
+      powerGenerated: 0,
+      waterDistributed: 0,
+      weatherCondition: 'ensoleillé',
+      alerts: [],
+      irrigationWater: 0,
+      treatedWastewater: 0,
+      waterQuality: 90,
+      floodRisk: 10,
+      userConsumption: 0,
+      glacierVolume: 1000000,
+      meltRate: 0,
+      isAutoMode: true,
+    };
 
     // Réinitialiser toutes les sources de données
-    waterSource$.next(50);
-    weatherSource$.next('ensoleillé');
-    wastewaterSource$.next(0);
-    userConsumptionSource$.next(0);
-    glacierSource$.next(1000000);
+    dataSources.waterSource$.next(50);
+    dataSources.weatherSource$.next('ensoleillé');
+    dataSources.wastewaterSource$.next(0);
+    dataSources.userConsumptionSource$.next(0);
+    dataSources.glacierSource$.next(1000000);
 
     // Forcer une mise à jour immédiate
     const baseWaterInput = 40 + (Math.random() * 40 - 20);
     const seasonalFactor = 1 + 0.3 * Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 30));
-    waterSource$.next(baseWaterInput * seasonalFactor);
-    glacierSource$.next(glacierVolume.value);
+    dataSources.waterSource$.next(baseWaterInput * seasonalFactor);
+    dataSources.glacierSource$.next(state.value.glacierVolume);
     weatherSimulation$.pipe(take(1)).subscribe((weather) => {
-      weatherCondition.value = weather;
-      weatherSource$.next(weather);
+      state.value.weatherCondition = weather;
+      dataSources.weatherSource$.next(weather);
     });
 
     // Recréer toutes les souscriptions
-    subscriptions = [
-      dam$.subscribe((level) => {
-        waterLevel.value = level;
+    const subscriptions = [
+      dam$.pipe(
+        takeUntil(destroy$),
+        catchError(error => handleError(error, 'Souscription au niveau du barrage'))
+      ).subscribe((level) => {
+        state.value.waterLevel = level;
       }),
-      purificationPlant$.subscribe((water) => {
-        purifiedWater.value += water;
+
+      purificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.value.purifiedWater += water;
       }),
-      powerPlant$.subscribe((power) => {
-        powerGenerated.value += power;
+
+      powerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
+        state.value.powerGenerated += power;
       }),
-      irrigation$.subscribe((water) => {
-        irrigationWater.value = water;
+
+      irrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.value.irrigationWater = water;
       }),
-      wastewaterTreatment$.subscribe((water) => {
-        treatedWastewater.value = water;
+
+      wastewaterTreatment$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.value.treatedWastewater = water;
       }),
-      waterQualityControl$.subscribe((quality) => {
-        waterQuality.value = quality;
+
+      waterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
+        state.value.waterQuality = quality;
       }),
-      floodPrediction$.subscribe((risk) => {
-        floodRisk.value = risk;
+
+      floodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
+        state.value.floodRisk = risk;
       }),
-      userWaterManagement$.subscribe((consumption) => {
-        userConsumption.value = consumption;
+
+      userWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
+        state.value.userConsumption = consumption;
       }),
-      alertSystem$.subscribe(({ message, priority }) => {
-        const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
-        alerts.value.push({
-          id: uuidv4(),
-          message,
-          timestamp,
-          priority,
-        });
+
+      alertSystem$.pipe(takeUntil(destroy$)).subscribe(),
+
+      weatherSimulation$.pipe(takeUntil(destroy$)).subscribe((weather) => {
+        state.value.weatherCondition = weather;
+        dataSources.weatherSource$.next(weather);
       }),
-      weatherSimulation$.subscribe((weather) => {
-        weatherCondition.value = weather;
-        weatherSource$.next(weather);
+
+      waterDistribution$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.value.waterDistributed = water;
       }),
-      waterDistribution$.subscribe((water) => {
-        waterDistributed.value = water;
-      }),
-      glacierMelt$.subscribe(({ volume, meltRate: rate }) => {
-        glacierVolume.value = volume;
-        meltRate.value = rate;
+
+      glacierMelt$.pipe(takeUntil(destroy$)).subscribe(({ volume, meltRate: rate }) => {
+        state.value.glacierVolume = volume;
+        state.value.meltRate = rate;
       }),
     ];
 
@@ -371,15 +435,15 @@ export function useWaterSystem() {
   }
 
   function setWaterLevel(level: number) {
-    if (!isAutoMode.value) {
-      waterLevel.value = level;
-      waterSource$.next(level);
+    if (!state.value.isAutoMode) {
+      state.value.waterLevel = level;
+      dataSources.waterSource$.next(level);
     }
   }
 
   function toggleAutoMode() {
-    isAutoMode.value = !isAutoMode.value;
-    if (isAutoMode.value) {
+    state.value.isAutoMode = !state.value.isAutoMode;
+    if (state.value.isAutoMode) {
       startSimulation();
     } else {
       stopSimulation();
@@ -391,18 +455,18 @@ export function useWaterSystem() {
   function startSimulation() {
     if (simulationInterval) return;
     simulationInterval = window.setInterval(() => {
-      if (isAutoMode.value) {
+      if (state.value.isAutoMode) {
         const baseWaterInput = 40 + (Math.random() * 40 - 20);
         const seasonalFactor = 1 + 0.3 * Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 30));
-        waterSource$.next(baseWaterInput * seasonalFactor);
+        dataSources.waterSource$.next(baseWaterInput * seasonalFactor);
 
         // Mise à jour du volume du glacier
-        glacierSource$.next(glacierVolume.value);
+        dataSources.glacierSource$.next(state.value.glacierVolume);
 
         // Forcer une mise à jour des autres valeurs
         weatherSimulation$.pipe(take(1)).subscribe((weather) => {
-          weatherCondition.value = weather;
-          weatherSource$.next(weather);
+          state.value.weatherCondition = weather;
+          dataSources.weatherSource$.next(weather);
         });
       }
     }, 500);
@@ -420,27 +484,19 @@ export function useWaterSystem() {
   });
 
   onUnmounted(() => {
-    subscriptions.forEach((sub) => sub.unsubscribe());
+    destroy$.next();
+    destroy$.complete();
     stopSimulation();
   });
 
   return {
-    waterLevel,
-    purifiedWater,
-    powerGenerated,
-    waterDistributed,
-    weatherCondition,
-    alerts,
-    irrigationWater,
-    treatedWastewater,
-    waterQuality,
-    floodRisk,
-    userConsumption,
+    state,
     resetSystem,
     setWaterLevel,
-    isAutoMode,
     toggleAutoMode,
-    glacierVolume,
-    meltRate,
+    totalWaterProcessed,
+    systemEfficiency,
+    overallSystemStatus,
+    addAlert, // Exposer la fonction addAlert pour une utilisation externe si nécessaire
   };
 }

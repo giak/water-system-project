@@ -1,9 +1,9 @@
+import { waterSystemConfig } from '@/config/waterSystemConfig';
 import type { Alert, DataSources, WaterSystemState, WeatherCondition } from '@/types/waterSystem';
 import { PriorityQueue } from '@datastructures-js/priority-queue';
 import { format } from 'date-fns';
 import { throttle } from 'lodash-es';
-import type { Observable } from 'rxjs';
-import { Subject, combineLatest, interval, merge, of } from 'rxjs';
+import { type Observable, Subject, interval, merge, of } from 'rxjs';
 import {
   catchError,
   debounceTime,
@@ -21,7 +21,8 @@ import {
 } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
-import { waterSystemConfig } from '@/config/waterSystemConfig';
+import { useGlacierMelt } from './useGlacierMelt';
+import { useWeatherSimulation } from './useWeatherSimulation';
 
 const MAX_ALERTS = 1000; // Nombre maximum d'alertes à conserver
 const DAILY_RESET_VALUE = 1000; // Valeur arbitraire, à ajuster selon les besoins
@@ -170,7 +171,7 @@ export function useWaterSystem() {
   const totalWaterProcessed = computed(
     waterSystemConfig.enablePerformanceLogs
       ? measureReactivePerformance('totalWaterProcessed', throttledTotalWaterProcessed)
-      : throttledTotalWaterProcessed
+      : throttledTotalWaterProcessed,
   );
 
   const throttledSystemEfficiency = throttle(() => {
@@ -181,7 +182,7 @@ export function useWaterSystem() {
   const systemEfficiency = computed(
     waterSystemConfig.enablePerformanceLogs
       ? measureReactivePerformance('systemEfficiency', throttledSystemEfficiency)
-      : throttledSystemEfficiency
+      : throttledSystemEfficiency,
   );
 
   const overallSystemStatus = computed(() => {
@@ -203,49 +204,13 @@ export function useWaterSystem() {
     glacierSource$: new Subject<number>(),
   };
 
-  // Simulation des conditions météorologiques
-  const weatherSimulation$: Observable<WeatherCondition> = interval(10000).pipe(
-    map(() => {
-      const conditions: WeatherCondition[] = ['ensoleillé', 'nuageux', 'pluvieux', 'orageux'];
-      const randomIndex = Math.floor(Math.random() * conditions.length);
-      return conditions[randomIndex];
-    }),
-  );
-
-  // Modifions la simulation de la fonte du glacier
-  const glacierMelt$ = combineLatest([interval(1000), dataSources.weatherSource$]).pipe(
-    withLatestFrom(dataSources.glacierSource$),
-    map(([[, weather], volume]) => {
-      let meltRate = 0;
-      switch (weather) {
-        case 'ensoleillé':
-          meltRate = volume * 0.0001; // 0.01% de fonte par heure
-          break;
-        case 'nuageux':
-          meltRate = volume * 0.00005; // 0.005% de fonte par heure
-          break;
-        case 'pluvieux':
-          meltRate = volume * 0.00015; // 0.015% de fonte par heure
-          break;
-        case 'orageux':
-          meltRate = volume * 0.0002; // 0.02% de fonte par heure
-          break;
-      }
-      const newVolume = Math.max(0, volume - meltRate);
-      dataSources.glacierSource$.next(newVolume);
-      return { volume: newVolume, meltRate };
-    }),
-    catchError((error) => handleError(error, 'Simulation de fonte du glacier')),
-    shareReplay(1),
-  );
+  const { weatherSimulation$ } = useWeatherSimulation();
+  const { glacierMelt$ } = useGlacierMelt(dataSources.weatherSource$, dataSources.glacierSource$);
 
   // Modifions le barrage pour permettre des niveaux d'eau plus bas
-  const dam$ = combineLatest([
-    dataSources.waterSource$,
-    dataSources.weatherSource$,
-    glacierMelt$,
-  ]).pipe(
-    map(([level, weather, glacier]) => {
+  const dam$ = interval(1000).pipe(
+    withLatestFrom(dataSources.waterSource$, dataSources.weatherSource$, glacierMelt$),
+    map(([, level, weather, glacier]) => {
       let adjustedLevel = level + glacier.meltRate;
       if (weather === 'pluvieux') adjustedLevel *= 1.1;
       if (weather === 'orageux') adjustedLevel *= 1.3;
@@ -275,6 +240,9 @@ export function useWaterSystem() {
         map(() => water / 5),
       ),
     ),
+    scan((acc, value) => acc + value, 0),
+    shareReplay({ bufferSize: 1, refCount: true }),
+    measureObservablePerformance('purificationPlant$'),
   );
 
   // Centrale hydroélectrique avec rendement variable
@@ -284,17 +252,25 @@ export function useWaterSystem() {
       const efficiency = 0.7 + Math.random() * 0.2; // Rendement entre 70% et 90%
       return water * 0.4 * efficiency * 10;
     }),
+    scan((acc, value) => acc + value, 0), // Accumuler la production d'énergie
+    distinctUntilChanged(),
+    shareReplay({ bufferSize: 1, refCount: true }),
+    measureObservablePerformance('powerPlant$'),
   );
 
   // Système d'irrigation influencé par la météo
-  const irrigation$ = combineLatest([purificationPlant$, dataSources.weatherSource$]).pipe(
-    map(([water, weather]) => {
+  const irrigation$ = interval(1000).pipe(
+    withLatestFrom(purificationPlant$, dataSources.weatherSource$),
+    map(([, water, weather]) => {
       let irrigationNeed = water * 0.3;
       if (weather === 'ensoleillé') irrigationNeed *= 1.2;
       if (weather === 'pluvieux') irrigationNeed *= 0.5;
       return irrigationNeed;
     }),
     scan((acc, value) => acc + value, 0),
+    distinctUntilChanged(),
+    shareReplay({ bufferSize: 1, refCount: true }),
+    measureObservablePerformance('irrigation$'),
   );
 
   // Traitement des eaux usées avec efficacité variable
@@ -304,15 +280,15 @@ export function useWaterSystem() {
       return wastewater * efficiency;
     }),
     scan((acc, value) => acc + value, 0),
+    distinctUntilChanged(),
+    shareReplay({ bufferSize: 1, refCount: true }),
+    measureObservablePerformance('wastewaterTreatment$'),
   );
 
   // Contrôle de la qualité de l'eau
-  const waterQualityControl$ = combineLatest([
-    purificationPlant$,
-    wastewaterTreatment$,
-    dataSources.weatherSource$,
-  ]).pipe(
-    map(([purified, treated, weather]) => {
+  const waterQualityControl$ = interval(1000).pipe(
+    withLatestFrom(purificationPlant$, wastewaterTreatment$, dataSources.weatherSource$),
+    map(([, purified, treated, weather]) => {
       let qualityScore = (purified / (purified + treated)) * 100;
       if (weather === 'orageux') qualityScore *= 0.9; // La qualité diminue lors des orages
       return Math.max(0, Math.min(100, qualityScore));
@@ -322,8 +298,9 @@ export function useWaterSystem() {
   );
 
   // Système de prévision des inondations
-  const floodPrediction$ = combineLatest([dam$, dataSources.weatherSource$]).pipe(
-    map(([waterLevel, weather]) => {
+  const floodPrediction$ = interval(1000).pipe(
+    withLatestFrom(dam$, dataSources.weatherSource$),
+    map(([, waterLevel, weather]) => {
       let risk = 0;
       if (weather === 'pluvieux') risk += 20;
       if (weather === 'orageux') risk += 40;
@@ -334,12 +311,13 @@ export function useWaterSystem() {
   );
 
   // Gestion de la consommation d'eau des utilisateurs
-  const userWaterManagement$ = combineLatest([
-    dataSources.userConsumptionSource$,
-    waterQualityControl$,
-    dataSources.weatherSource$,
-  ]).pipe(
-    map(([consumption, quality, weather]) => {
+  const userWaterManagement$ = interval(1000).pipe(
+    withLatestFrom(
+      dataSources.userConsumptionSource$,
+      waterQualityControl$,
+      dataSources.weatherSource$,
+    ),
+    map(([, consumption, quality, weather]) => {
       let adjustedConsumption = consumption;
       if (quality < 50) adjustedConsumption *= 0.8;
       if (weather === 'ensoleillé') adjustedConsumption *= 1.2;

@@ -29,7 +29,7 @@ export interface DataSources {
   weatherSource$: Subject<WeatherCondition>;
   wastewaterSource$: Subject<number>;
   userConsumptionSource$: Subject<number>;
-  glacierSource$: Subject<number>;
+  glacierSource$: Subject<number>; // Changé de Observable<number> à Subject<number>
 }
 
 export type WeatherCondition = 'ensoleillé' | 'nuageux' | 'pluvieux' | 'orageux';

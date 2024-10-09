@@ -1,6 +1,9 @@
 <template>
   <div class="purification-plant">
-    <h3>Station de Purification</h3>
+    <h3>
+      <i class="pi pi-filter mr-2"></i>
+      Station de Purification
+    </h3>
     <p>
       Eau purifiée: {{ purifiedWater.toFixed(2) }} m³
       <TrendArrow :trend="purifiedWaterTrend" />

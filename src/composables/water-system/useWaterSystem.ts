@@ -12,7 +12,7 @@ import {
   withLatestFrom,
 } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid'; // Assurez-vous d'installer et d'importer uuid
-import { onMounted, onUnmounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 
 interface Alert {
   id: string; // Ajout d'un id unique
@@ -149,7 +149,7 @@ export function useWaterSystem() {
     }),
   );
 
-  // Système de prévision des inondations
+  // Syst��me de prvision des inondations
   const floodPrediction$ = combineLatest([dam$, weatherSource$]).pipe(
     map(([waterLevel, weather]) => {
       let risk = 0;
@@ -275,6 +275,12 @@ export function useWaterSystem() {
   let subscriptions: any[] = [];
 
   function resetSystem() {
+    // Arrêter toutes les simulations et souscriptions en cours
+    stopSimulation();
+    subscriptions.forEach((sub) => sub.unsubscribe());
+    subscriptions = [];
+
+    // Réinitialiser tous les états réactifs à leurs valeurs initiales
     waterLevel.value = 50;
     purifiedWater.value = 0;
     powerGenerated.value = 0;
@@ -288,13 +294,80 @@ export function useWaterSystem() {
     userConsumption.value = 0;
     glacierVolume.value = 1000000;
     meltRate.value = 0;
+    isAutoMode.value = true;
 
-    // Réinitialiser les sources de données
+    // Réinitialiser toutes les sources de données
     waterSource$.next(50);
     weatherSource$.next('ensoleillé');
     wastewaterSource$.next(0);
     userConsumptionSource$.next(0);
     glacierSource$.next(1000000);
+
+    // Forcer une mise à jour immédiate
+    const baseWaterInput = 40 + (Math.random() * 40 - 20);
+    const seasonalFactor = 1 + 0.3 * Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 30));
+    waterSource$.next(baseWaterInput * seasonalFactor);
+    glacierSource$.next(glacierVolume.value);
+    weatherSimulation$.pipe(take(1)).subscribe((weather) => {
+      weatherCondition.value = weather;
+      weatherSource$.next(weather);
+    });
+
+    // Recréer toutes les souscriptions
+    subscriptions = [
+      dam$.subscribe((level) => {
+        waterLevel.value = level;
+      }),
+      purificationPlant$.subscribe((water) => {
+        purifiedWater.value += water;
+      }),
+      powerPlant$.subscribe((power) => {
+        powerGenerated.value += power;
+      }),
+      irrigation$.subscribe((water) => {
+        irrigationWater.value = water;
+      }),
+      wastewaterTreatment$.subscribe((water) => {
+        treatedWastewater.value = water;
+      }),
+      waterQualityControl$.subscribe((quality) => {
+        waterQuality.value = quality;
+      }),
+      floodPrediction$.subscribe((risk) => {
+        floodRisk.value = risk;
+      }),
+      userWaterManagement$.subscribe((consumption) => {
+        userConsumption.value = consumption;
+      }),
+      alertSystem$.subscribe(({ message, priority }) => {
+        const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
+        alerts.value.push({
+          id: uuidv4(),
+          message,
+          timestamp,
+          priority,
+        });
+      }),
+      weatherSimulation$.subscribe((weather) => {
+        weatherCondition.value = weather;
+        weatherSource$.next(weather);
+      }),
+      waterDistribution$.subscribe((water) => {
+        waterDistributed.value = water;
+      }),
+      glacierMelt$.subscribe(({ volume, meltRate: rate }) => {
+        glacierVolume.value = volume;
+        meltRate.value = rate;
+      }),
+    ];
+
+    // Redémarrer la simulation
+    startSimulation();
+
+    // Forcer une mise à jour de tous les composants
+    nextTick(() => {
+      console.log('Système entièrement réinitialisé');
+    });
   }
 
   function setWaterLevel(level: number) {
@@ -325,8 +398,14 @@ export function useWaterSystem() {
 
         // Mise à jour du volume du glacier
         glacierSource$.next(glacierVolume.value);
+
+        // Forcer une mise à jour des autres valeurs
+        weatherSimulation$.pipe(take(1)).subscribe((weather) => {
+          weatherCondition.value = weather;
+          weatherSource$.next(weather);
+        });
       }
-    }, 2000);
+    }, 500);
   }
 
   function stopSimulation() {
@@ -337,44 +416,7 @@ export function useWaterSystem() {
   }
 
   onMounted(() => {
-    subscriptions = [
-      dam$.subscribe((level) => {
-        if (isAutoMode.value) {
-          waterLevel.value = level;
-          // console.log(`Niveau d'eau actuel: ${level}`);
-        }
-      }),
-      purificationPlant$.subscribe((water) => (purifiedWater.value += water)),
-      powerPlant$.subscribe((power) => (powerGenerated.value += power)),
-      irrigation$.subscribe((water) => (irrigationWater.value = water)),
-      wastewaterTreatment$.subscribe((water) => (treatedWastewater.value = water)),
-      waterQualityControl$.subscribe((quality) => (waterQuality.value = quality)),
-      floodPrediction$.subscribe((risk) => (floodRisk.value = risk)),
-      userWaterManagement$.subscribe((consumption) => (userConsumption.value = consumption)),
-      alertSystem$.subscribe(({ message, priority }) => {
-        const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
-        // console.log(`Nouvelle alerte: ${message} (Priorité: ${priority})`);
-        alerts.value.push({
-          id: uuidv4(), // Génération d'un id unique pour chaque alerte
-          message,
-          timestamp,
-          priority,
-        });
-      }),
-      weatherSimulation$.subscribe((weather) => {
-        weatherCondition.value = weather;
-        weatherSource$.next(weather);
-      }),
-      waterDistribution$.subscribe((water) => (waterDistributed.value = water)),
-      glacierMelt$.subscribe(({ volume, meltRate: rate }) => {
-        glacierVolume.value = volume;
-        meltRate.value = rate;
-      }),
-    ];
-
-    if (isAutoMode.value) {
-      startSimulation();
-    }
+    resetSystem(); // Initialiser le système au montage
   });
 
   onUnmounted(() => {

@@ -1,16 +1,24 @@
 <template>
   <div class="distribution" :class="distributionClass">
-    <h3>Distribution d'Eau</h3>
-    <p>
-      Eau distribuée: {{ displayedWaterDistributed }} m³
-      <TrendArrow v-if="showTrend" :trend="waterDistributedTrend" />
-    </p>
-    <p v-if="isLowWater" class="alert">
-      ⚠️ Niveau d'eau critique ! Distribution limitée.
-    </p>
-    <p v-else-if="isEffectiveDistribution" class="info">
-      ✅ Distribution d'eau effective.
-    </p>
+    <h3>
+      <i class="pi pi-share-alt mr-2"></i>
+      Distribution d'Eau
+    </h3>
+    <div class="distribution-info">
+      <div class="info-label">Eau distribuée :</div>
+      <div class="info-value">
+        {{ displayedWaterDistributed }} m³
+        <TrendArrow v-if="showTrend" :trend="waterDistributedTrend" />
+      </div>
+    </div>
+    <div class="distribution-status">
+      <p v-if="isLowWater" class="alert">
+        ⚠️ Niveau d'eau critique ! Distribution limitée.
+      </p>
+      <p v-else-if="isEffectiveDistribution" class="info">
+        ✅ Distribution d'eau effective.
+      </p>
+    </div>
   </div>
 </template>
 

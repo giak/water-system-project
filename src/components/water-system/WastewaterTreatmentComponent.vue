@@ -1,6 +1,9 @@
 <template>
   <div class="wastewater-treatment">
-    <h3>Traitement des Eaux Usées</h3>
+    <h3>
+      <i class="pi pi-refresh mr-2"></i>
+      Traitement des Eaux Usées
+    </h3>
     <p>
       Eau traitée: {{ treatedWastewater.toFixed(2) }} m³
       <TrendArrow :trend="treatedWastewaterTrend" />

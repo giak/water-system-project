@@ -1,6 +1,9 @@
 <template>
   <div class="dam">
-    <h3>Barrage</h3>
+    <h3>
+      <i class="pi pi-shield mr-2"></i>
+      Barrage
+    </h3>
     <div class="water-level" :style="{ height: `${waterLevel}%` }"></div>
     <p class="water-level-info">
       Niveau d'eau: {{ waterLevel.toFixed(2) }}%

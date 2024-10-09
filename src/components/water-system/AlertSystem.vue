@@ -1,6 +1,9 @@
 <template>
   <div class="alert-system">
-    <h3>Système d'Alerte <span class="alert-count">({{ alerts.length }})</span></h3>
+    <h3>
+      <i class="pi pi-bell mr-2"></i>
+      Système d'Alerte <span class="alert-count">({{ alerts.length }})</span>
+    </h3>
     <div class="alert-columns">
       <div v-for="priority in ['high', 'medium', 'low']" :key="priority" :class="`alert-column ${priority}-priority`">
         <h4>{{ getPriorityLabel(priority) }}</h4>

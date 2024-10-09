@@ -1,6 +1,9 @@
 <template>
   <div class="user-consumption">
-    <h3>Consommation des Utilisateurs</h3>
+    <h3>
+      <i class="pi pi-users mr-2"></i>
+      Consommation des Utilisateurs
+    </h3>
     <p>
       Total consommé: {{ userConsumption.toFixed(2) }} m³
       <TrendArrow :trend="userConsumptionTrend" />

@@ -1,12 +1,11 @@
 .water-system {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  grid-gap: 20px;
+  grid-gap: 10px;
   width: 100%; // Utilise toute la largeur disponible
   height: 100vh; // Utilise toute la hauteur de la fenêtre
   margin: 0 auto;
-  padding: 20px;
-  background-color: #f0f8ff;
+  padding: 10px;
   box-sizing: border-box; // Inclut le padding dans la largeur totale
   
   &__header {
@@ -147,6 +146,12 @@
   grid-row: span 2;
   grid-column: span 2;
   grid-row: span 2;
+
+
+  h3 {
+    color: #000;
+    z-index: 1000;
+  }
 
   .water-level {
     position: absolute;

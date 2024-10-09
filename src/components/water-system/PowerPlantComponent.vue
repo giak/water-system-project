@@ -1,6 +1,9 @@
 <template>
   <div class="power-plant">
-    <h3>Centrale Hydroélectrique</h3>
+    <h3>
+      <i class="pi pi-bolt mr-2"></i>
+      Centrale Hydroélectrique
+    </h3>
     <p>
       Énergie produite: {{ powerGenerated.toFixed(2) }} kWh
       <TrendArrow :trend="powerGeneratedTrend" />

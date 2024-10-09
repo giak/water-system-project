@@ -1,6 +1,9 @@
 <template>
   <div class="water-quality">
-    <h3>Qualité de l'Eau</h3>
+    <h3>
+      <i class="pi pi-check-circle mr-2"></i>
+      Qualité de l'Eau
+    </h3>
     <p>
       Indice de qualité: {{ waterQuality.toFixed(2) }}%
       <TrendArrow :trend="waterQualityTrend" />

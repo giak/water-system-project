@@ -1,6 +1,9 @@
 <template>
   <div class="flood-prediction">
-    <h3>Prévision des Inondations</h3>
+    <h3>
+      <i class="pi pi-exclamation-triangle mr-2"></i>
+      Prévision des Inondations
+    </h3>
     <p>
       Risque: {{ floodRisk.toFixed(2) }}%
       <TrendArrow :trend="floodRiskTrend" />

@@ -1,0 +1,31 @@
+:root {
+  // Couleurs
+  --color-primary: #3490dc;
+  --color-secondary: #ffed4a;
+  --color-success: #38c172;
+  --color-danger: #e3342f;
+  --color-warning: #f6993f;
+  --color-info: #6574cd;
+  --color-light: #f8f9fa;
+  --color-dark: #343a40;
+
+  // Espacements
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  // Tailles de police ajustées (légèrement plus petites)
+  --font-size-xs: 0.65rem;  // Était 0.75rem
+  --font-size-sm: 0.75rem;  // Était 0.875rem
+  --font-size-md: 0.875rem; // Était 1rem
+  --font-size-lg: 1rem;     // Était 1.125rem
+  --font-size-xl: 1.125rem; // Était 1.25rem
+
+  // Breakpoints
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+}

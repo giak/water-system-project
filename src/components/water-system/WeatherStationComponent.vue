@@ -1,6 +1,9 @@
 <template>
   <div class="weather-station">
-    <h3>Station Météo</h3>
+    <h3>
+      <i class="pi pi-sun mr-2"></i>
+      Station Météo
+    </h3>
     <p>
       Conditions: {{ weatherCondition }}
       <span :title="changeText" class="weather-change">{{ changeSymbol }}</span>

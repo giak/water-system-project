@@ -1,6 +1,9 @@
 <template>
   <div class="irrigation">
-    <h3>Système d'Irrigation</h3>
+    <h3>
+      <i class="pi pi-seedling mr-2"></i>
+      Système d'Irrigation
+    </h3>
     <p>
       Eau utilisée: {{ irrigationWater.toFixed(2) }} m³
       <TrendArrow :trend="irrigationWaterTrend" />

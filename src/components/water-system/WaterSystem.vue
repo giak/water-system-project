@@ -4,8 +4,8 @@
       <h2 class="water-system__title">Système de Gestion de l'Eau Avancé</h2>
       <div class="water-system__status">
         <p>Statut global : {{ overallSystemStatus }}</p>
-        <p>Efficacité du système : {{ systemEfficiency.toFixed(2) }}%</p>
-        <p>Total d'eau traitée : {{ totalWaterProcessed.toFixed(2) }} m³</p>
+        <p>Efficacité du système : {{ systemEfficiency?.toFixed(2) ?? 'N/A' }}%</p>
+        <p>Total d'eau traitée : {{ totalWaterProcessed?.toFixed(2) ?? 'N/A' }} m³</p>
       </div>
     </div>
     <div class="water-system__components">

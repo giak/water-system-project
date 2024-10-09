@@ -3,25 +3,28 @@ import type { Alert, DataSources, WaterSystemState, WeatherCondition } from '@/t
 import { PriorityQueue } from '@datastructures-js/priority-queue';
 import { format } from 'date-fns';
 import { throttle } from 'lodash-es';
-import { type Observable, Subject, interval, merge, of } from 'rxjs';
+import { type Observable, Subject, merge, of } from 'rxjs';
 import {
   catchError,
-  debounceTime,
   distinctUntilChanged,
   filter,
   map,
-  mergeMap,
-  scan,
-  shareReplay,
   take,
   takeUntil,
   tap,
-  throttleTime,
-  withLatestFrom,
 } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { useDamManagement } from './useDamManagement';
+import { useFloodPrediction } from './useFloodPrediction';
 import { useGlacierMelt } from './useGlacierMelt';
+import { useIrrigation } from './useIrrigation';
+import { usePowerPlant } from './usePowerPlant';
+import { useUserWaterManagement } from './useUserWaterManagement';
+import { useWastewaterTreatment } from './useWastewaterTreatment';
+import { useWaterDistribution } from './useWaterDistribution';
+import { useWaterPurification } from './useWaterPurification';
+import { useWaterQualityControl } from './useWaterQualityControl';
 import { useWeatherSimulation } from './useWeatherSimulation';
 
 const MAX_ALERTS = 1000; // Nombre maximum d'alertes à conserver
@@ -145,6 +148,8 @@ function addAlert(message: string, priority: Alert['priority']) {
 }
 
 export function useWaterSystem() {
+  const destroy$ = new Subject<void>();
+
   // États réactifs
   const state = ref<WaterSystemState>({
     waterLevel: 50,
@@ -163,38 +168,6 @@ export function useWaterSystem() {
     meltRate: 0,
   });
 
-  // Ajout de valeurs calculées
-  const throttledTotalWaterProcessed = throttle(() => {
-    return state.value.purifiedWater + state.value.waterDistributed;
-  }, 1000); // Calcul au maximum une fois par seconde
-
-  const totalWaterProcessed = computed(
-    waterSystemConfig.enablePerformanceLogs
-      ? measureReactivePerformance('totalWaterProcessed', throttledTotalWaterProcessed)
-      : throttledTotalWaterProcessed,
-  );
-
-  const throttledSystemEfficiency = throttle(() => {
-    if (totalWaterProcessed.value === 0) return 0;
-    return (state.value.purifiedWater / totalWaterProcessed.value) * 100;
-  }, 1000);
-
-  const systemEfficiency = computed(
-    waterSystemConfig.enablePerformanceLogs
-      ? measureReactivePerformance('systemEfficiency', throttledSystemEfficiency)
-      : throttledSystemEfficiency,
-  );
-
-  const overallSystemStatus = computed(() => {
-    if (state.value.waterLevel < 20 || state.value.waterQuality < 50) {
-      return 'Critique';
-    }
-    if (state.value.waterLevel < 40 || state.value.waterQuality < 70) {
-      return 'Préoccupant';
-    }
-    return 'Normal';
-  });
-
   // Sources de données
   const dataSources: DataSources = {
     waterSource$: new Subject<number>(),
@@ -204,145 +177,109 @@ export function useWaterSystem() {
     glacierSource$: new Subject<number>(),
   };
 
+  // Déclaration des composables
   const { weatherSimulation$ } = useWeatherSimulation();
   const { glacierMelt$ } = useGlacierMelt(dataSources.weatherSource$, dataSources.glacierSource$);
-
-  // Modifions le barrage pour permettre des niveaux d'eau plus bas
-  const dam$ = interval(1000).pipe(
-    withLatestFrom(dataSources.waterSource$, dataSources.weatherSource$, glacierMelt$),
-    map(([, level, weather, glacier]) => {
-      let adjustedLevel = level + glacier.meltRate;
-      if (weather === 'pluvieux') adjustedLevel *= 1.1;
-      if (weather === 'orageux') adjustedLevel *= 1.3;
-      if (weather === 'ensoleillé') adjustedLevel *= 0.9;
-
-      // Ajoutez une variation aléatoire
-      const randomVariation = (Math.random() - 0.5) * 10; // Variation de ±5%
-      adjustedLevel += randomVariation;
-
-      return Math.max(0, Math.min(adjustedLevel, 100));
-    }),
-    catchError((error) => handleError(error, 'Calcul du niveau du barrage')),
-    measureObservablePerformance('dam$'),
-    shareReplay(1),
+  const { dam$ } = useDamManagement(
+    dataSources.waterSource$,
+    dataSources.weatherSource$,
+    glacierMelt$,
   );
-
-  // Station de purification avec efficacité variable
-  const purificationPlant$ = dam$.pipe(
-    filter((level) => level > 20),
-    map((water) => {
-      const efficiency = 0.5 + Math.random() * 0.3; // Efficacité entre 50% et 80%
-      return water * efficiency;
-    }),
-    mergeMap((water) =>
-      interval(1000).pipe(
-        take(5),
-        map(() => water / 5),
-      ),
-    ),
-    scan((acc, value) => acc + value, 0),
-    shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('purificationPlant$'),
+  const { purificationPlant$ } = useWaterPurification(dam$);
+  const { powerPlant$ } = usePowerPlant(dam$);
+  const { irrigation$ } = useIrrigation(purificationPlant$, dataSources.weatherSource$);
+  const { wastewaterTreatment$ } = useWastewaterTreatment(dataSources.wastewaterSource$);
+  const { waterQualityControl$ } = useWaterQualityControl(
+    purificationPlant$,
+    wastewaterTreatment$,
+    dataSources.weatherSource$,
   );
-
-  // Centrale hydroélectrique avec rendement variable
-  const powerPlant$ = dam$.pipe(
-    filter((level) => level > 30),
-    map((water) => {
-      const efficiency = 0.7 + Math.random() * 0.2; // Rendement entre 70% et 90%
-      return water * 0.4 * efficiency * 10;
-    }),
-    scan((acc, value) => acc + value, 0), // Accumuler la production d'énergie
-    distinctUntilChanged(),
-    shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('powerPlant$'),
+  const { floodPrediction$ } = useFloodPrediction(dam$, dataSources.weatherSource$);
+  const { userWaterManagement$ } = useUserWaterManagement(
+    dataSources.userConsumptionSource$,
+    waterQualityControl$,
+    dataSources.weatherSource$,
   );
+  const { waterDistribution$ } = useWaterDistribution(dam$);
 
-  // Système d'irrigation influencé par la météo
-  const irrigation$ = interval(1000).pipe(
-    withLatestFrom(purificationPlant$, dataSources.weatherSource$),
-    map(([, water, weather]) => {
-      let irrigationNeed = water * 0.3;
-      if (weather === 'ensoleillé') irrigationNeed *= 1.2;
-      if (weather === 'pluvieux') irrigationNeed *= 0.5;
-      return irrigationNeed;
-    }),
-    scan((acc, value) => acc + value, 0),
-    distinctUntilChanged(),
-    shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('irrigation$'),
-  );
+  // Souscriptions
+  weatherSimulation$.pipe(takeUntil(destroy$)).subscribe((weather) => {
+    state.value.weatherCondition = weather;
+  });
 
-  // Traitement des eaux usées avec efficacité variable
-  const wastewaterTreatment$ = dataSources.wastewaterSource$.pipe(
-    map((wastewater) => {
-      const efficiency = 0.6 + Math.random() * 0.3; // Efficacité entre 60% et 90%
-      return wastewater * efficiency;
-    }),
-    scan((acc, value) => acc + value, 0),
-    distinctUntilChanged(),
-    shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('wastewaterTreatment$'),
-  );
+  glacierMelt$.pipe(takeUntil(destroy$)).subscribe(({ volume, meltRate }) => {
+    state.value.glacierVolume = volume;
+    state.value.meltRate = meltRate;
+  });
 
-  // Contrôle de la qualité de l'eau
-  const waterQualityControl$ = interval(1000).pipe(
-    withLatestFrom(purificationPlant$, wastewaterTreatment$, dataSources.weatherSource$),
-    map(([, purified, treated, weather]) => {
-      let qualityScore = (purified / (purified + treated)) * 100;
-      if (weather === 'orageux') qualityScore *= 0.9; // La qualité diminue lors des orages
-      return Math.max(0, Math.min(100, qualityScore));
-    }),
-    measureObservablePerformance('waterQualityControl$'),
-    shareReplay(1),
-  );
+  dam$.pipe(takeUntil(destroy$)).subscribe((level) => {
+    state.value.waterLevel = level;
+  });
 
-  // Système de prévision des inondations
-  const floodPrediction$ = interval(1000).pipe(
-    withLatestFrom(dam$, dataSources.weatherSource$),
-    map(([, waterLevel, weather]) => {
-      let risk = 0;
-      if (weather === 'pluvieux') risk += 20;
-      if (weather === 'orageux') risk += 40;
-      if (waterLevel > 80) risk += 30;
-      if (waterLevel > 90) risk += 20;
-      return Math.min(100, risk);
-    }),
-  );
+  purificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
+    state.value.purifiedWater = water;
+  });
 
-  // Gestion de la consommation d'eau des utilisateurs
-  const userWaterManagement$ = interval(1000).pipe(
-    withLatestFrom(
-      dataSources.userConsumptionSource$,
-      waterQualityControl$,
-      dataSources.weatherSource$,
-    ),
-    map(([, consumption, quality, weather]) => {
-      let adjustedConsumption = consumption;
-      if (quality < 50) adjustedConsumption *= 0.8;
-      if (weather === 'ensoleillé') adjustedConsumption *= 1.2;
-      return adjustedConsumption;
-    }),
-    scan((acc, value) => acc + value, 0),
-    // Limitons l'accumulation à une période donnée (par exemple, les dernières 24 heures)
-    map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
-    shareReplay(1),
-  );
+  powerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
+    state.value.powerGenerated = power;
+  });
 
-  // Ajustons la distribution d'eau en fonction du niveau d'eau
-  const waterDistribution$ = dam$.pipe(
-    map((level) => {
-      if (level > 70) return level * 0.8;
-      if (level > 30) return level * 0.5;
-      return level * 0.2;
-    }),
-    scan((acc, value) => acc + value, 0),
-    // Limitons également l'accumulation ici
-    map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
-    shareReplay(1),
-  );
+  irrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
+    state.value.irrigationWater = water;
+  });
 
-  // Système de surveillance et d'alerte
+  wastewaterTreatment$.pipe(takeUntil(destroy$)).subscribe((water) => {
+    state.value.treatedWastewater = water;
+  });
+
+  waterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
+    state.value.waterQuality = quality;
+  });
+
+  floodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
+    state.value.floodRisk = risk;
+  });
+
+  userWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
+    state.value.userConsumption = consumption;
+  });
+
+  waterDistribution$.pipe(takeUntil(destroy$)).subscribe((distributedWater) => {
+    state.value.waterDistributed = distributedWater;
+
+    // Ajoutez des alertes basées sur la distribution d'eau
+    if (distributedWater < 50) {
+      addAlert("Distribution d'eau faible", 'medium');
+    } else if (distributedWater > 500) {
+      addAlert("Distribution d'eau élevée", 'low');
+    }
+  });
+
+  // Ajoutez ces souscriptions
+  irrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
+    state.value.irrigationWater = water;
+    if (water > 1000) {
+      addAlert("Consommation d'eau pour l'irrigation élevée", 'medium');
+    }
+  });
+
+  powerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
+    state.value.powerGenerated = power;
+    if (power < 100) {
+      addAlert("Production d'énergie faible", 'medium');
+    } else if (power > 1000) {
+      addAlert("Production d'énergie exceptionnellement élevée", 'low');
+    }
+  });
+
+  userWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
+    state.value.userConsumption = consumption;
+    if (consumption > 500) {
+      addAlert("Consommation d'eau des utilisateurs élevée", 'medium');
+    }
+  });
+
+  // Réintégrer alertSystem$
   const alertSystem$ = merge(
     dam$.pipe(
       distinctUntilChanged(),
@@ -375,22 +312,6 @@ export function useWaterSystem() {
       }),
       filter((alert): alert is Exclude<typeof alert, null> => alert !== null),
     ),
-    dataSources.weatherSource$.pipe(
-      filter((condition) => condition === 'orageux'),
-      map(() => ({
-        message: 'Alerte : Conditions météorologiques dangereuses!',
-        priority: 'medium' as const,
-      })),
-    ),
-    purificationPlant$.pipe(
-      scan((acc, value) => acc + value, 0),
-      filter((total) => total < 100),
-      debounceTime(5000),
-      map(() => ({
-        message: "Alerte : Production d'eau purifie faible!",
-        priority: 'medium' as const,
-      })),
-    ),
     waterQualityControl$.pipe(
       filter((quality) => quality < 60),
       map(() => ({
@@ -402,58 +323,52 @@ export function useWaterSystem() {
       filter((risk) => risk > 80),
       map(() => ({ message: "Alerte : Risque élevé d'inondation!", priority: 'high' as const })),
     ),
-    dam$.pipe(
-      filter((level) => level < 30),
+    waterDistribution$.pipe(
+      filter((water) => water < 50),
       map(() => ({
-        message: "Alerte : Niveau d'eau critique, distribution limitée!",
-        priority: 'high' as const,
+        message: "Alerte : Distribution d'eau faible",
+        priority: 'medium' as const,
       })),
     ),
-    dam$.pipe(
-      filter((level) => level > 70),
+    waterDistribution$.pipe(
+      filter((water) => water > 500),
       map(() => ({
-        message: "Information : Distribution d'eau effective.",
+        message: "Information : Distribution d'eau élevée",
         priority: 'low' as const,
       })),
     ),
-    dam$.pipe(
-      filter((level) => level <= 70 && level > 30),
-      map(() => ({ message: "Alerte : Distribution d'eau réduite.", priority: 'medium' as const })),
+    irrigation$.pipe(
+      filter((water) => water > 1000),
+      map(() => ({
+        message: "Alerte : Consommation d'eau pour l'irrigation élevée",
+        priority: 'medium' as const,
+      })),
     ),
-    dam$.pipe(
-      filter((level) => level <= 30),
-      map(() => ({ message: "Alerte : Distribution d'eau minimale !", priority: 'high' as const })),
+    powerPlant$.pipe(
+      filter((power) => power < 100),
+      map(() => ({
+        message: "Alerte : Production d'énergie faible",
+        priority: 'medium' as const,
+      })),
+    ),
+    powerPlant$.pipe(
+      filter((power) => power > 1000),
+      map(() => ({
+        message: "Information : Production d'énergie exceptionnellement élevée",
+        priority: 'low' as const,
+      })),
+    ),
+    userWaterManagement$.pipe(
+      filter((consumption) => consumption > 500),
+      map(() => ({
+        message: "Alerte : Consommation d'eau des utilisateurs élevée",
+        priority: 'medium' as const,
+      })),
     ),
   ).pipe(map(({ message, priority }) => addAlert(message, priority)));
 
-  // Optimisation des observables fréquemment utilisés
-  const throttleInterval = 2000; // 2 secondes
-
-  const sharedDam$ = dam$.pipe(
-    distinctUntilChanged(),
-    throttleTime(throttleInterval),
-    measureObservablePerformance('sharedDam$'),
-    shareReplay({ bufferSize: 1, refCount: true }),
-  );
-
-  const throttleIntervalLong = 10000; // 10 secondes
-
-  const sharedWaterQualityControl$ = waterQualityControl$.pipe(
-    distinctUntilChanged(),
-    throttleTime(throttleIntervalLong),
-    measureObservablePerformance('sharedWaterQualityControl$'),
-    shareReplay({ bufferSize: 1, refCount: true }),
-  );
-
-  const sharedFloodPrediction$ = floodPrediction$.pipe(
-    distinctUntilChanged(),
-    throttleTime(throttleInterval),
-    measureObservablePerformance('sharedFloodPrediction$'),
-    shareReplay({ bufferSize: 1, refCount: true }),
-  );
-
-  // Création d'un Subject pour la gestion du nettoyage
-  const destroy$ = new Subject<void>();
+  // S'abonner à alertSystem$
+  alertSystem$.pipe(takeUntil(destroy$)).subscribe();
 
   // Modification de la fonction resetSystem pour utiliser les observables partagés
   function resetSystem() {
@@ -499,7 +414,7 @@ export function useWaterSystem() {
 
     // Recréer toutes les souscriptions
     const subscriptions = [
-      sharedDam$
+      dam$ // Remplacer sharedDam$ par dam$
         .pipe(
           takeUntil(destroy$),
           catchError((error) => handleError(error, 'Souscription au niveau du barrage')),
@@ -524,11 +439,11 @@ export function useWaterSystem() {
         state.value.treatedWastewater = water;
       }),
 
-      sharedWaterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
+      waterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
         state.value.waterQuality = quality;
       }),
 
-      sharedFloodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
+      floodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
         state.value.floodRisk = risk;
       }),
 
@@ -627,6 +542,39 @@ export function useWaterSystem() {
     return Array.from(alertQueue.toArray());
   });
 
+  // Ajout de ces fonctions au début du fichier
+  const throttledTotalWaterProcessed = throttle(() => {
+    return state.value.purifiedWater + state.value.waterDistributed;
+  }, 1000); // Calcul au maximum une fois par seconde
+
+  const totalWaterProcessed = computed(
+    waterSystemConfig.enablePerformanceLogs
+      ? measureReactivePerformance('totalWaterProcessed', throttledTotalWaterProcessed)
+      : throttledTotalWaterProcessed,
+  );
+
+  const throttledSystemEfficiency = throttle(() => {
+    const processedWater = totalWaterProcessed.value;
+    if (processedWater === undefined || processedWater === 0) return 0;
+    return (state.value.purifiedWater / processedWater) * 100;
+  }, 1000);
+
+  const systemEfficiency = computed(
+    waterSystemConfig.enablePerformanceLogs
+      ? measureReactivePerformance('systemEfficiency', throttledSystemEfficiency)
+      : throttledSystemEfficiency,
+  );
+
+  const overallSystemStatus = computed(() => {
+    if (state.value.waterLevel < 20 || state.value.waterQuality < 50) {
+      return 'Critique';
+    }
+    if (state.value.waterLevel < 40 || state.value.waterQuality < 70) {
+      return 'Préoccupant';
+    }
+    return 'Normal';
+  });
+
   return {
     state,
     resetSystem,
@@ -637,5 +585,6 @@ export function useWaterSystem() {
     overallSystemStatus,
     alerts,
     addAlert,
+    waterDistribution$, // Ajoutez ceci si vous voulez exposer waterDistribution$ à l'extérieur du composable
   };
 }

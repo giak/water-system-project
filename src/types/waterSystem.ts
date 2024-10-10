@@ -1,4 +1,5 @@
 import type { Observable, Subject } from 'rxjs';
+import type { Ref } from 'vue';
 
 export type WeatherCondition = 'ensoleillé' | 'nuageux' | 'pluvieux' | 'orageux';
 

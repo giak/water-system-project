@@ -7,8 +7,6 @@ import type {
   WaterSystemState,
   WeatherCondition,
 } from '@/types/waterSystem';
-import { PriorityQueue } from '@datastructures-js/priority-queue';
-import { format } from 'date-fns';
 import { throttle } from 'lodash-es';
 import { Observable, Subject, merge, of } from 'rxjs';
 import {
@@ -21,8 +19,7 @@ import {
   takeUntil,
   tap,
 } from 'rxjs/operators';
-import { v4 as uuidv4 } from 'uuid';
-import type { Ref } from 'vue';
+import type { ComputedRef, Ref } from 'vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useAlertSystem } from './useAlertSystem';
 import { useDamManagement } from './useDamManagement';
@@ -38,134 +35,51 @@ import { useWaterPurification } from './useWaterPurification';
 import { useWaterQualityControl } from './useWaterQualityControl';
 import { useWeatherSimulation } from './useWeatherSimulation';
 
-const MAX_ALERTS = 1000; // Nombre maximum d'alertes à conserver
-
 // Définition d'un type pour les erreurs
 type WaterSystemError = Error | unknown;
-
-const alertQueue = new PriorityQueue<Alert>((a, b) => {
-  const priorityOrder = { high: 3, medium: 2, low: 1 };
-  if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-    return priorityOrder[b.priority] - priorityOrder[a.priority];
-  }
-  return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-});
-
-const alertsChanged = ref(0);
 
 // Modification de la fonction utilitaire pour la gestion des erreurs
 function handleError(error: WaterSystemError, context: string): Observable<never> {
   console.error(`Erreur dans ${context}:`, error);
+  // Vous pouvez ajouter ici une logique pour envoyer l'erreur à un service de monitoring
   return of(); // Retourne un Observable vide pour continuer le flux
 }
 
-function getPerformanceNow(): number {
-  return typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
-}
-
-function logPerformance(name: string, startTime: number) {
-  if (waterSystemConfig.enablePerformanceLogs) {
-    const endTime = performance.now();
-    console.log(`Performance de ${name}: ${endTime - startTime} ms`);
-  }
-}
-
-function logObservablePerformance(name: string, value: unknown, time: number) {
-  if (waterSystemConfig.enablePerformanceLogs) {
-    console.log(
-      `Observable ${name} - Temps: ${time.toFixed(2)}ms - Valeur: ${JSON.stringify(value)}`,
-    );
-  }
-}
-
-function measureReactivePerformance<T>(name: string, fn: () => T): () => T {
-  return () => {
-    const startTime = performance.now();
-    const result = fn();
-    if (waterSystemConfig.enablePerformanceLogs) {
-      const endTime = performance.now();
-      console.log(`Performance de ${name}: ${endTime - startTime} ms`);
-    }
-    return result;
-  };
-}
-
-function groupSimilarAlerts(alert: Alert): Alert & { count?: number } {
-  const existingAlert = Array.from(alertQueue.toArray()).find(
-    (a) => a.priority === alert.priority && a.message === alert.message,
-  ) as (Alert & { count?: number }) | undefined;
-
-  if (existingAlert) {
-    existingAlert.count = (existingAlert.count || 1) + 1;
-    existingAlert.timestamp = alert.timestamp;
-    return existingAlert;
-  }
-
-  return { ...alert, count: 1 };
-}
-
-function addAlert(message: string, priority: Alert['priority']) {
-  const startTime = getPerformanceNow();
-  const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
-  const newAlert: Alert = {
-    id: uuidv4(),
-    message,
-    timestamp,
-    priority,
-  };
-
-  const groupedAlert = groupSimilarAlerts(newAlert);
-
-  if (groupedAlert.count === 1) {
-    alertQueue.enqueue(groupedAlert);
-    if (alertQueue.size() > MAX_ALERTS) {
-      alertQueue.dequeue();
-    }
-  }
-
-  // Émettre un événement pour signaler que les alertes ont changé
-  alertsChanged.value += 1;
-
-  logPerformance('addAlert', startTime);
-}
-
 export function useWaterSystem(): {
-  state: Ref<WaterSystemState>;
+  state: ComputedRef<WaterSystemState>;
   observables: WaterSystemObservables;
   simulationControls: SimulationControls;
   resetSystem: () => void;
   setWaterLevel: (level: number) => void;
   toggleAutoMode: () => void;
-  totalWaterProcessed: Ref<number>;
-  systemEfficiency: Ref<number>;
-  overallSystemStatus: Ref<string>;
+  totalWaterProcessed: ComputedRef<number>;
+  systemEfficiency: ComputedRef<number>;
+  overallSystemStatus: ComputedRef<string>;
   alerts: Ref<Alert[]>;
   addAlert: (message: string, priority: Alert['priority']) => void;
-  currentWaterLevel: Ref<number>;
+  currentWaterLevel: ComputedRef<number>;
   toggleManualMode: () => void;
-  isManualMode: Ref<boolean>; // Ajoutez cette ligne
+  isManualMode: ComputedRef<boolean>;
 } {
   const destroy$ = new Subject<void>();
   const { alerts, addAlert } = useAlertSystem();
 
   // États réactifs
   const state = ref<WaterSystemState>({
-    waterLevel: 50,
+    waterLevel: waterSystemConfig.INITIAL_WATER_LEVEL,
     isAutoMode: true,
-    purifiedWater: 0,
-    powerGenerated: 0,
-    waterDistributed: 0,
-    weatherCondition: 'ensoleillé' as WeatherCondition, // Spécifiez le type ici
+    purifiedWater: waterSystemConfig.INITIAL_PURIFIED_WATER,
+    powerGenerated: waterSystemConfig.INITIAL_POWER_GENERATED,
+    waterDistributed: waterSystemConfig.INITIAL_WATER_DISTRIBUTED,
+    weatherCondition: 'ensoleillé' as WeatherCondition,
     alerts: [],
-    irrigationWater: 0,
-    treatedWastewater: 0,
-    waterQuality: 90,
-    floodRisk: 10,
-    userConsumption: 0,
-    glacierVolume: 1000000,
-    meltRate: 0,
+    irrigationWater: waterSystemConfig.INITIAL_IRRIGATION_WATER,
+    treatedWastewater: waterSystemConfig.INITIAL_TREATED_WASTEWATER,
+    waterQuality: waterSystemConfig.INITIAL_WATER_QUALITY,
+    floodRisk: waterSystemConfig.INITIAL_FLOOD_RISK,
+    userConsumption: waterSystemConfig.INITIAL_USER_CONSUMPTION,
+    glacierVolume: waterSystemConfig.INITIAL_GLACIER_VOLUME,
+    meltRate: waterSystemConfig.INITIAL_MELT_RATE,
   });
 
   // Sources de données
@@ -209,21 +123,21 @@ export function useWaterSystem(): {
     toggleAutoMode: simulationToggleAutoMode,
   } = useSimulation(dataSources, weatherSimulation$);
 
-  const manualWaterLevel = ref(50);
+  const manualWaterLevel = ref(waterSystemConfig.INITIAL_WATER_LEVEL);
   const isManualMode = ref(false);
 
   const currentWaterLevel = computed(() => {
     return isManualMode.value ? manualWaterLevel.value : state.value.waterLevel;
   });
 
-  const setWaterLevel = (level: number) => {
+  const setWaterLevel = (level: number): void => {
     if (isManualMode.value) {
       manualWaterLevel.value = level;
       state.value.waterLevel = level;
     }
   };
 
-  const toggleManualMode = () => {
+  const toggleManualMode = (): void => {
     isManualMode.value = !isManualMode.value;
     if (isManualMode.value) {
       stopSimulation();
@@ -234,7 +148,7 @@ export function useWaterSystem(): {
     simulationToggleAutoMode();
   };
 
-  function toggleAutoMode() {
+  function toggleAutoMode(): void {
     isManualMode.value = false;
   }
 
@@ -243,8 +157,8 @@ export function useWaterSystem(): {
     observable: Observable<T>,
     next: (value: T) => void,
     context: string,
-  ) => {
-    return observable
+  ): void => {
+    observable
       .pipe(
         distinctUntilChanged(),
         takeUntil(destroy$),
@@ -356,9 +270,9 @@ export function useWaterSystem(): {
       state.value.waterDistributed = distributedWater;
 
       // Ajoutez des alertes basées sur la distribution d'eau
-      if (distributedWater < 50) {
+      if (distributedWater < waterSystemConfig.LOW_WATER_DISTRIBUTION) {
         addAlert("Distribution d'eau faible", 'medium');
-      } else if (distributedWater > 500) {
+      } else if (distributedWater > waterSystemConfig.HIGH_WATER_DISTRIBUTION) {
         addAlert("Distribution d'eau élevée", 'low');
       }
     },
@@ -369,22 +283,22 @@ export function useWaterSystem(): {
   const alertSystem$ = merge(
     sharedDam$.pipe(
       map((level) => {
-        if (level >= 90)
+        if (level >= waterSystemConfig.VERY_HIGH_WATER_LEVEL)
           return {
             message: 'Alerte : Niveau du barrage critique! (90%+)',
             priority: 'high' as const,
           };
-        if (level >= 80)
+        if (level >= waterSystemConfig.HIGH_WATER_LEVEL)
           return {
             message: 'Avertissement : Niveau du barrage élevé (80%+)',
             priority: 'medium' as const,
           };
-        if (level <= 20)
+        if (level <= waterSystemConfig.CRITICAL_WATER_LEVEL)
           return {
             message: 'Alerte : Niveau du barrage très bas! (20% ou moins)',
             priority: 'high' as const,
           };
-        if (level <= 30)
+        if (level <= waterSystemConfig.LOW_WATER_LEVEL)
           return {
             message: 'Avertissement : Niveau du barrage bas (30% ou moins)',
             priority: 'medium' as const,
@@ -394,44 +308,44 @@ export function useWaterSystem(): {
       filter((alert): alert is Exclude<typeof alert, null> => alert !== null),
     ),
     sharedWaterQualityControl$.pipe(
-      filter((quality) => quality < 60),
+      filter((quality) => quality < waterSystemConfig.LOW_WATER_QUALITY),
       map(() => ({
         message: "Alerte : Qualité de l'eau en dessous des normes!",
         priority: 'high' as const,
       })),
     ),
     sharedFloodPrediction$.pipe(
-      filter((risk) => risk > 80),
+      filter((risk) => risk > waterSystemConfig.HIGH_FLOOD_RISK),
       map(() => ({ message: "Alerte : Risque élevé d'inondation!", priority: 'high' as const })),
     ),
     sharedWaterDistribution$.pipe(
-      filter((water) => water < 50),
+      filter((water) => water < waterSystemConfig.LOW_WATER_DISTRIBUTION),
       map(() => ({ message: "Alerte : Distribution d'eau faible", priority: 'medium' as const })),
     ),
     sharedWaterDistribution$.pipe(
-      filter((water) => water > 500),
+      filter((water) => water > waterSystemConfig.HIGH_WATER_DISTRIBUTION),
       map(() => ({ message: "Information : Distribution d'eau élevée", priority: 'low' as const })),
     ),
     sharedIrrigation$.pipe(
-      filter((water) => water > 1000),
+      filter((water) => water > waterSystemConfig.HIGH_IRRIGATION_WATER),
       map(() => ({
         message: "Alerte : Consommation d'eau pour l'irrigation élevée",
         priority: 'medium' as const,
       })),
     ),
     sharedPowerPlant$.pipe(
-      filter((power) => power < 100),
+      filter((power) => power < waterSystemConfig.LOW_POWER_GENERATION),
       map(() => ({ message: "Alerte : Production d'énergie faible", priority: 'medium' as const })),
     ),
     sharedPowerPlant$.pipe(
-      filter((power) => power > 1000),
+      filter((power) => power > waterSystemConfig.HIGH_POWER_GENERATION),
       map(() => ({
         message: "Information : Production d'énergie exceptionnellement élevée",
         priority: 'low' as const,
       })),
     ),
     sharedUserWaterManagement$.pipe(
-      filter((consumption) => consumption > 500),
+      filter((consumption) => consumption > waterSystemConfig.HIGH_USER_CONSUMPTION),
       map(() => ({
         message: "Alerte : Consommation d'eau des utilisateurs élevée",
         priority: 'medium' as const,
@@ -446,7 +360,7 @@ export function useWaterSystem(): {
   alertSystem$.pipe(takeUntil(destroy$)).subscribe();
 
   // Modification de la fonction resetSystem pour utiliser les observables partagés
-  function resetSystem() {
+  function resetSystem(): void {
     // Arrêter toutes les simulations et souscriptions en cours
     stopSimulation();
     destroy$.next();
@@ -454,32 +368,38 @@ export function useWaterSystem(): {
 
     // Réinitialiser tous les états réactifs à leurs valeurs initiales
     state.value = {
-      waterLevel: 50,
-      purifiedWater: 0,
-      powerGenerated: 0,
-      waterDistributed: 0,
+      waterLevel: waterSystemConfig.INITIAL_WATER_LEVEL,
+      purifiedWater: waterSystemConfig.INITIAL_PURIFIED_WATER,
+      powerGenerated: waterSystemConfig.INITIAL_POWER_GENERATED,
+      waterDistributed: waterSystemConfig.INITIAL_WATER_DISTRIBUTED,
       weatherCondition: 'ensoleillé' as WeatherCondition,
       alerts: [],
-      irrigationWater: 0,
-      treatedWastewater: 0,
-      waterQuality: 90,
-      floodRisk: 10,
-      userConsumption: 0,
-      glacierVolume: 1000000,
-      meltRate: 0,
+      irrigationWater: waterSystemConfig.INITIAL_IRRIGATION_WATER,
+      treatedWastewater: waterSystemConfig.INITIAL_TREATED_WASTEWATER,
+      waterQuality: waterSystemConfig.INITIAL_WATER_QUALITY,
+      floodRisk: waterSystemConfig.INITIAL_FLOOD_RISK,
+      userConsumption: waterSystemConfig.INITIAL_USER_CONSUMPTION,
+      glacierVolume: waterSystemConfig.INITIAL_GLACIER_VOLUME,
+      meltRate: waterSystemConfig.INITIAL_MELT_RATE,
       isAutoMode: true,
     };
 
     // Réinitialiser toutes les sources de données
-    dataSources.waterSource$.next(50);
+    dataSources.waterSource$.next(waterSystemConfig.INITIAL_WATER_LEVEL);
     dataSources.weatherSource$.next('ensoleillé');
-    dataSources.wastewaterSource$.next(0);
-    dataSources.userConsumptionSource$.next(0);
-    dataSources.glacierSource$.next(1000000);
+    dataSources.wastewaterSource$.next(waterSystemConfig.INITIAL_TREATED_WASTEWATER);
+    dataSources.userConsumptionSource$.next(waterSystemConfig.INITIAL_USER_CONSUMPTION);
+    dataSources.glacierSource$.next(waterSystemConfig.INITIAL_GLACIER_VOLUME);
 
     // Forcer une mise à jour immédiate
-    const baseWaterInput = 40 + (Math.random() * 40 - 20);
-    const seasonalFactor = 1 + 0.3 * Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 30));
+    const baseWaterInput =
+      waterSystemConfig.BASE_WATER_INPUT_MIN +
+      Math.random() *
+        (waterSystemConfig.BASE_WATER_INPUT_MAX - waterSystemConfig.BASE_WATER_INPUT_MIN);
+    const seasonalFactor =
+      1 +
+      waterSystemConfig.SEASONAL_FACTOR_AMPLITUDE *
+        Math.sin(Date.now() / waterSystemConfig.SEASONAL_FACTOR_PERIOD);
     dataSources.waterSource$.next(baseWaterInput * seasonalFactor);
     dataSources.glacierSource$.next(state.value.glacierVolume);
     weatherSimulation$.pipe(take(1)).subscribe((weather) => {
@@ -489,7 +409,7 @@ export function useWaterSystem(): {
 
     // Recréer toutes les souscriptions
     const subscriptions = [
-      dam$ // Remplacer sharedDam$ par dam$
+      sharedDam$
         .pipe(
           takeUntil(destroy$),
           catchError((error) => handleError(error, 'Souscription au niveau du barrage')),
@@ -498,46 +418,46 @@ export function useWaterSystem(): {
           state.value.waterLevel = level;
         }),
 
-      purificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
+      sharedPurificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
         state.value.purifiedWater += water;
       }),
 
-      powerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
+      sharedPowerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
         state.value.powerGenerated += power;
       }),
 
-      irrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
+      sharedIrrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
         state.value.irrigationWater = water;
       }),
 
-      wastewaterTreatment$.pipe(takeUntil(destroy$)).subscribe((water) => {
+      sharedWastewaterTreatment$.pipe(takeUntil(destroy$)).subscribe((water) => {
         state.value.treatedWastewater = water;
       }),
 
-      waterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
+      sharedWaterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
         state.value.waterQuality = quality;
       }),
 
-      floodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
+      sharedFloodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
         state.value.floodRisk = risk;
       }),
 
-      userWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
+      sharedUserWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
         state.value.userConsumption = consumption;
       }),
 
       alertSystem$.pipe(takeUntil(destroy$)).subscribe(),
 
-      weatherSimulation$.pipe(takeUntil(destroy$)).subscribe((weather) => {
+      sharedWeather$.pipe(takeUntil(destroy$)).subscribe((weather) => {
         state.value.weatherCondition = weather;
         dataSources.weatherSource$.next(weather);
       }),
 
-      waterDistribution$.pipe(takeUntil(destroy$)).subscribe((water) => {
+      sharedWaterDistribution$.pipe(takeUntil(destroy$)).subscribe((water) => {
         state.value.waterDistributed = water;
       }),
 
-      glacierMelt$.pipe(takeUntil(destroy$)).subscribe(({ volume, meltRate: rate }) => {
+      sharedGlacierMelt$.pipe(takeUntil(destroy$)).subscribe(({ volume, meltRate: rate }) => {
         state.value.glacierVolume = volume;
         state.value.meltRate = rate;
       }),
@@ -563,10 +483,14 @@ export function useWaterSystem(): {
     stopSimulation();
   });
 
-  // Ajout de ces fonctions au début du fichier
-  const throttledTotalWaterProcessed = throttle(() => {
+  // Optimisation des calculs coûteux avec memoization
+  const memoizedTotalWaterProcessed = computed(() => {
     return state.value.purifiedWater + state.value.waterDistributed;
-  }, 1000); // Calcul au maximum une fois par seconde
+  });
+
+  const throttledTotalWaterProcessed = throttle(() => {
+    return memoizedTotalWaterProcessed.value;
+  }, waterSystemConfig.THROTTLE_DELAY);
 
   const totalWaterProcessed = computed(() => {
     if (waterSystemConfig.enablePerformanceLogs) {
@@ -578,11 +502,15 @@ export function useWaterSystem(): {
     return throttledTotalWaterProcessed();
   });
 
-  const throttledSystemEfficiency = throttle(() => {
-    const processedWater = totalWaterProcessed.value;
+  const memoizedSystemEfficiency = computed(() => {
+    const processedWater = memoizedTotalWaterProcessed.value;
     if (processedWater === 0) return 0;
     return (state.value.purifiedWater / processedWater) * 100;
-  }, 1000);
+  });
+
+  const throttledSystemEfficiency = throttle(() => {
+    return memoizedSystemEfficiency.value;
+  }, waterSystemConfig.THROTTLE_DELAY);
 
   const systemEfficiency = computed(() => {
     if (waterSystemConfig.enablePerformanceLogs) {
@@ -595,10 +523,16 @@ export function useWaterSystem(): {
   });
 
   const overallSystemStatus = computed(() => {
-    if (state.value.waterLevel < 20 || state.value.waterQuality < 50) {
+    if (
+      state.value.waterLevel < waterSystemConfig.CRITICAL_WATER_LEVEL ||
+      state.value.waterQuality < waterSystemConfig.CRITICAL_WATER_QUALITY
+    ) {
       return 'Critique';
     }
-    if (state.value.waterLevel < 40 || state.value.waterQuality < 70) {
+    if (
+      state.value.waterLevel < waterSystemConfig.LOW_WATER_LEVEL ||
+      state.value.waterQuality < waterSystemConfig.MEDIUM_WATER_QUALITY
+    ) {
       return 'Préoccupant';
     }
     return 'Normal';

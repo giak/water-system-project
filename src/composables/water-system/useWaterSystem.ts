@@ -1,9 +1,16 @@
 import { waterSystemConfig } from '@/config/waterSystemConfig';
-import type { Alert, DataSources, WaterSystemState, WeatherCondition } from '@/types/waterSystem';
+import type {
+  Alert,
+  DataSources,
+  SimulationControls,
+  WaterSystemObservables,
+  WaterSystemState,
+  WeatherCondition,
+} from '@/types/waterSystem';
 import { PriorityQueue } from '@datastructures-js/priority-queue';
 import { format } from 'date-fns';
 import { throttle } from 'lodash-es';
-import { type Observable, Subject, merge, of } from 'rxjs';
+import { Observable, Subject, merge, of } from 'rxjs';
 import {
   catchError,
   distinctUntilChanged,
@@ -14,12 +21,15 @@ import {
   tap,
 } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import type { Ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useAlertSystem } from './useAlertSystem';
 import { useDamManagement } from './useDamManagement';
 import { useFloodPrediction } from './useFloodPrediction';
 import { useGlacierMelt } from './useGlacierMelt';
 import { useIrrigation } from './useIrrigation';
 import { usePowerPlant } from './usePowerPlant';
+import { useSimulation } from './useSimulation';
 import { useUserWaterManagement } from './useUserWaterManagement';
 import { useWastewaterTreatment } from './useWastewaterTreatment';
 import { useWaterDistribution } from './useWaterDistribution';
@@ -147,8 +157,20 @@ function addAlert(message: string, priority: Alert['priority']) {
   logPerformance('addAlert', startTime);
 }
 
-export function useWaterSystem() {
+export function useWaterSystem(): {
+  state: Ref<WaterSystemState>;
+  observables: WaterSystemObservables;
+  simulationControls: SimulationControls;
+  resetSystem: () => void;
+  setWaterLevel: (level: number) => void;
+  totalWaterProcessed: Ref<number>;
+  systemEfficiency: Ref<number>;
+  overallSystemStatus: Ref<string>;
+  alerts: Ref<Alert[]>;
+  addAlert: (message: string, priority: Alert['priority']) => void;
+} {
   const destroy$ = new Subject<void>();
+  const { alerts, addAlert } = useAlertSystem();
 
   // États réactifs
   const state = ref<WaterSystemState>({
@@ -201,6 +223,11 @@ export function useWaterSystem() {
     dataSources.weatherSource$,
   );
   const { waterDistribution$ } = useWaterDistribution(dam$);
+
+  const { isAutoMode, startSimulation, stopSimulation, toggleAutoMode } = useSimulation(
+    dataSources,
+    weatherSimulation$,
+  );
 
   // Souscriptions
   weatherSimulation$.pipe(takeUntil(destroy$)).subscribe((weather) => {
@@ -478,49 +505,9 @@ export function useWaterSystem() {
   }
 
   function setWaterLevel(level: number) {
-    if (!state.value.isAutoMode) {
+    if (!isAutoMode.value) {
       state.value.waterLevel = level;
       dataSources.waterSource$.next(level);
-    }
-  }
-
-  function toggleAutoMode() {
-    state.value.isAutoMode = !state.value.isAutoMode;
-    if (state.value.isAutoMode) {
-      startSimulation();
-    } else {
-      stopSimulation();
-    }
-  }
-
-  let simulationInterval: number | null = null;
-
-  function startSimulation() {
-    if (simulationInterval) return;
-    simulationInterval = window.setInterval(() => {
-      if (state.value.isAutoMode) {
-        const baseWaterInput = 40 + (Math.random() * 60 - 30); // Plus grande plage de variation
-        const seasonalFactor = 1 + 0.5 * Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 30)); // Effet saisonnier plus prononcé
-        dataSources.waterSource$.next(baseWaterInput * seasonalFactor);
-
-        // Mise à jour du volume du glacier avec une fonte variable
-        const glacierMeltRate = 0.00001 + Math.random() * 0.00009; // Taux de fonte variable
-        state.value.glacierVolume = Math.max(0, state.value.glacierVolume * (1 - glacierMeltRate));
-        dataSources.glacierSource$.next(state.value.glacierVolume);
-
-        // Forcer une mise à jour des autres valeurs
-        weatherSimulation$.pipe(take(1)).subscribe((weather) => {
-          state.value.weatherCondition = weather;
-          dataSources.weatherSource$.next(weather);
-        });
-      }
-    }, 2000);
-  }
-
-  function stopSimulation() {
-    if (simulationInterval) {
-      window.clearInterval(simulationInterval);
-      simulationInterval = null;
     }
   }
 
@@ -533,13 +520,6 @@ export function useWaterSystem() {
     destroy$.next();
     destroy$.complete();
     stopSimulation();
-  });
-
-  // Modifiez le computed pour les alertes
-  const alerts = computed(() => {
-    // Utilisez alertsChanged.value pour forcer la réévaluation
-    alertsChanged.value;
-    return Array.from(alertQueue.toArray());
   });
 
   // Ajout de ces fonctions au début du fichier
@@ -575,16 +555,51 @@ export function useWaterSystem() {
     return 'Normal';
   });
 
+  // Convertir le ComputedRef<Alert[]> en Observable<Alert[]>
+  const alertsObservable$ = new Observable<Alert[]>((subscriber) => {
+    const unwatch = watch(
+      alerts,
+      (newAlerts) => {
+        subscriber.next(newAlerts);
+      },
+      { immediate: true, deep: true },
+    );
+
+    return () => {
+      unwatch();
+    };
+  });
+
   return {
     state,
+    observables: {
+      waterLevel: dam$,
+      purifiedWater: purificationPlant$,
+      powerGenerated: powerPlant$,
+      waterDistributed: waterDistribution$,
+      weatherCondition: weatherSimulation$,
+      alerts: alertsObservable$,
+      irrigationWater: irrigation$,
+      treatedWastewater: wastewaterTreatment$,
+      waterQuality: waterQualityControl$,
+      floodRisk: floodPrediction$,
+      userConsumption: userWaterManagement$,
+      glacierVolume: glacierMelt$.pipe(map(({ volume }) => volume)),
+      meltRate: glacierMelt$.pipe(map(({ meltRate }) => meltRate)),
+      isAutoMode: isAutoMode as unknown as Observable<boolean>, // Cast isAutoMode to Observable<boolean>
+    },
+    simulationControls: {
+      isAutoMode: isAutoMode.value,
+      startSimulation,
+      stopSimulation,
+      toggleAutoMode,
+    },
     resetSystem,
     setWaterLevel,
-    toggleAutoMode,
-    totalWaterProcessed,
-    systemEfficiency,
+    totalWaterProcessed: totalWaterProcessed as Ref<number>, // Cast to Ref<number>
+    systemEfficiency: systemEfficiency as Ref<number>, // Cast to Ref<number>
     overallSystemStatus,
     alerts,
     addAlert,
-    waterDistribution$, // Ajoutez ceci si vous voulez exposer waterDistribution$ à l'extérieur du composable
   };
 }

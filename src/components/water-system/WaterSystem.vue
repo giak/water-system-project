@@ -15,9 +15,9 @@
       />
       <DamComponent 
         :water-level="state.waterLevel" 
-        :is-auto-mode="state.isAutoMode"
+        :is-auto-mode="simulationControls.isAutoMode"
         @update:water-level="setWaterLevel"
-        @toggle-auto-mode="toggleAutoMode"
+        @toggle-auto-mode="simulationControls.toggleAutoMode"
         @reset-system="resetSystem"
       />
       <PurificationPlantComponent :purified-water="state.purifiedWater" />
@@ -34,7 +34,7 @@
       <UserConsumptionComponent :user-consumption="state.userConsumption" />
     </div>
     <div class="water-system__alerts">
-      <AlertSystem :alerts="state.alerts" />
+      <AlertSystem :alerts="alerts" />
     </div>
   </div>
 </template>
@@ -58,7 +58,7 @@ const {
   state,
   resetSystem,
   setWaterLevel,
-  toggleAutoMode,
+  simulationControls,
   totalWaterProcessed,
   systemEfficiency,
   overallSystemStatus,

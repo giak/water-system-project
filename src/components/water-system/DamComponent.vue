@@ -48,10 +48,13 @@ const formattedWaterLevel = computed(() => props.currentWaterLevel.toFixed(2));
 
 const waterLevelTrend = ref(0);
 
-watch(() => props.currentWaterLevel, (newValue, oldValue) => {
-  localWaterLevel.value = newValue;
-  waterLevelTrend.value = newValue - oldValue;
-});
+watch(
+  () => props.currentWaterLevel,
+  (newValue, oldValue) => {
+    localWaterLevel.value = newValue;
+    waterLevelTrend.value = newValue - oldValue;
+  },
+);
 
 const updateWaterLevel = () => {
   if (props.isManualMode) {

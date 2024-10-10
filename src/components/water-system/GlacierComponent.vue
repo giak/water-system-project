@@ -54,7 +54,6 @@ watch(
   }
 );
 </script>
-
 <style scoped>
 /* Styles existants */
 </style>

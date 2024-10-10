@@ -8,6 +8,13 @@
         <p>Total d'eau traitée : {{ totalWaterProcessed?.toFixed(2) ?? 'N/A' }} m³</p>
       </div>
     </div>
+    <SystemControls
+      :current-water-level="currentWaterLevel"
+      :is-manual-mode="isManualMode"
+      @update:water-level="setWaterLevel"
+      @toggle-manual-mode="toggleManualMode"
+      @reset-system="resetSystem"
+    />
     <div class="water-system__components">
       <GlacierComponent 
         :glacier-volume="state.glacierVolume" 
@@ -41,18 +48,30 @@
 
 <script setup lang="ts">
 import { useWaterSystem } from '@/composables/water-system/useWaterSystem';
+import { defineAsyncComponent } from 'vue';
 import AlertSystem from './AlertSystem.vue';
 import DamComponent from './DamComponent.vue';
 import DistributionComponent from './DistributionComponent.vue';
-import FloodPredictionComponent from './FloodPredictionComponent.vue';
-import GlacierComponent from './GlacierComponent.vue';
-import IrrigationComponent from './IrrigationComponent.vue';
-import PowerPlantComponent from './PowerPlantComponent.vue';
-import PurificationPlantComponent from './PurificationPlantComponent.vue';
-import UserConsumptionComponent from './UserConsumptionComponent.vue';
-import WastewaterTreatmentComponent from './WastewaterTreatmentComponent.vue';
-import WaterQualityComponent from './WaterQualityComponent.vue';
-import WeatherStationComponent from './WeatherStationComponent.vue';
+import SystemControls from './SystemControls.vue';
+
+// Composants chargés de manière asynchrone
+const FloodPredictionComponent = defineAsyncComponent(
+  () => import('./FloodPredictionComponent.vue'),
+);
+const GlacierComponent = defineAsyncComponent(() => import('./GlacierComponent.vue'));
+const IrrigationComponent = defineAsyncComponent(() => import('./IrrigationComponent.vue'));
+const PowerPlantComponent = defineAsyncComponent(() => import('./PowerPlantComponent.vue'));
+const PurificationPlantComponent = defineAsyncComponent(
+  () => import('./PurificationPlantComponent.vue'),
+);
+const UserConsumptionComponent = defineAsyncComponent(
+  () => import('./UserConsumptionComponent.vue'),
+);
+const WastewaterTreatmentComponent = defineAsyncComponent(
+  () => import('./WastewaterTreatmentComponent.vue'),
+);
+const WaterQualityComponent = defineAsyncComponent(() => import('./WaterQualityComponent.vue'));
+const WeatherStationComponent = defineAsyncComponent(() => import('./WeatherStationComponent.vue'));
 
 const {
   state,

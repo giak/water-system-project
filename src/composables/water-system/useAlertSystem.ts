@@ -15,6 +15,9 @@ export function useAlertSystem() {
     return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
   });
 
+  // Nouvelle Map pour un accès rapide aux alertes existantes
+  const alertMap = new Map<string, Alert & { count: number }>();
+
   const alertsChanged = ref(0);
 
   function addAlert(message: string, priority: Alert['priority']) {
@@ -31,25 +34,29 @@ export function useAlertSystem() {
     if (groupedAlert.count === 1) {
       alertQueue.enqueue(groupedAlert);
       if (alertQueue.size() > MAX_ALERTS) {
-        alertQueue.dequeue();
+        const removedAlert = alertQueue.dequeue();
+        if (removedAlert) {
+          alertMap.delete(`${removedAlert.priority}-${removedAlert.message}`);
+        }
       }
     }
 
     alertsChanged.value += 1;
   }
 
-  function groupSimilarAlerts(alert: Alert): Alert & { count?: number } {
-    const existingAlert = Array.from(alertQueue.toArray()).find(
-      (a) => a.priority === alert.priority && a.message === alert.message,
-    ) as (Alert & { count?: number }) | undefined;
+  function groupSimilarAlerts(alert: Alert): Alert & { count: number } {
+    const key = `${alert.priority}-${alert.message}`;
+    const existingAlert = alertMap.get(key);
 
     if (existingAlert) {
-      existingAlert.count = (existingAlert.count || 1) + 1;
+      existingAlert.count += 1;
       existingAlert.timestamp = alert.timestamp;
       return existingAlert;
     }
 
-    return { ...alert, count: 1 };
+    const newGroupedAlert = { ...alert, count: 1 };
+    alertMap.set(key, newGroupedAlert);
+    return newGroupedAlert;
   }
 
   const alerts = computed(() => {

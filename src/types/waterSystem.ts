@@ -53,3 +53,21 @@ export type WaterSystemObservables = {
     ? Observable<Alert[]>
     : Observable<WaterSystemState[K]>;
 };
+
+export interface WaterSystemComposable {
+  state: Ref<WaterSystemState>;
+  observables: WaterSystemObservables;
+  simulationControls: SimulationControls;
+  updateWaterLevel: (newLevel: number) => void;
+  updatePurifiedWater: (amount: number) => void;
+  updatePowerGenerated: (amount: number) => void;
+  updateWaterDistributed: (amount: number) => void;
+  updateWeatherCondition: (condition: WeatherCondition) => void;
+  addAlert: (alert: Alert) => void;
+  removeAlert: (id: string) => void;
+  updateGlacierMeltRate: (rate: number) => void;
+  updateDamCapacity: (capacity: number) => void;
+  isManualMode: Ref<boolean>;
+  toggleManualMode: () => void;
+  toggleAutoMode: () => void; // Add this line
+}

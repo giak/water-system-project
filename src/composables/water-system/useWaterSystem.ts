@@ -16,6 +16,7 @@ import {
   distinctUntilChanged,
   filter,
   map,
+  shareReplay,
   take,
   takeUntil,
   tap,
@@ -38,12 +39,10 @@ import { useWaterQualityControl } from './useWaterQualityControl';
 import { useWeatherSimulation } from './useWeatherSimulation';
 
 const MAX_ALERTS = 1000; // Nombre maximum d'alertes à conserver
-const DAILY_RESET_VALUE = 1000; // Valeur arbitraire, à ajuster selon les besoins
 
 // Définition d'un type pour les erreurs
 type WaterSystemError = Error | unknown;
 
-// Définissez alertQueue en dehors de la fonction useWaterSystem
 const alertQueue = new PriorityQueue<Alert>((a, b) => {
   const priorityOrder = { high: 3, medium: 2, low: 1 };
   if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
@@ -52,39 +51,18 @@ const alertQueue = new PriorityQueue<Alert>((a, b) => {
   return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
 });
 
-// Déplacez cette déclaration en dehors de useWaterSystem, juste après les imports
 const alertsChanged = ref(0);
 
 // Modification de la fonction utilitaire pour la gestion des erreurs
 function handleError(error: WaterSystemError, context: string): Observable<never> {
   console.error(`Erreur dans ${context}:`, error);
-  // Vous pouvez ajouter ici une logique pour enregistrer l'erreur ou notifier l'utilisateur
   return of(); // Retourne un Observable vide pour continuer le flux
 }
 
-// Ajout de ces fonctions au début du fichier
 function getPerformanceNow(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
     : Date.now();
-}
-
-// Modifiez les fonctions de mesure de performance pour utiliser la configuration
-function measureObservablePerformance<T>(name: string) {
-  return tap<T>({
-    subscribe: () => {
-      if (waterSystemConfig.enablePerformanceLogs) console.time(`Subscribe ${name}`);
-    },
-    next: (value) => {
-      if (waterSystemConfig.enablePerformanceLogs) {
-        const endTime = performance.now();
-        logObservablePerformance(name, value, endTime - performance.now());
-      }
-    },
-    complete: () => {
-      if (waterSystemConfig.enablePerformanceLogs) console.timeEnd(`Subscribe ${name}`);
-    },
-  });
 }
 
 function logPerformance(name: string, startTime: number) {
@@ -94,7 +72,6 @@ function logPerformance(name: string, startTime: number) {
   }
 }
 
-// Ajout de cette fonction au début du fichier
 function logObservablePerformance(name: string, value: unknown, time: number) {
   if (waterSystemConfig.enablePerformanceLogs) {
     console.log(
@@ -103,7 +80,6 @@ function logObservablePerformance(name: string, value: unknown, time: number) {
   }
 }
 
-// Ajout de cette fonction au début du fichier
 function measureReactivePerformance<T>(name: string, fn: () => T): () => T {
   return () => {
     const startTime = performance.now();
@@ -116,7 +92,6 @@ function measureReactivePerformance<T>(name: string, fn: () => T): () => T {
   };
 }
 
-// Modifiez la fonction groupSimilarAlerts pour utiliser le type Alert correctement
 function groupSimilarAlerts(alert: Alert): Alert & { count?: number } {
   const existingAlert = Array.from(alertQueue.toArray()).find(
     (a) => a.priority === alert.priority && a.message === alert.message,
@@ -131,7 +106,6 @@ function groupSimilarAlerts(alert: Alert): Alert & { count?: number } {
   return { ...alert, count: 1 };
 }
 
-// Modifiez la fonction addAlert pour utiliser alertsChanged
 function addAlert(message: string, priority: Alert['priority']) {
   const startTime = getPerformanceNow();
   const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
@@ -232,7 +206,7 @@ export function useWaterSystem(): {
     isAutoMode,
     startSimulation,
     stopSimulation,
-    toggleAutoMode: simulationToggleAutoMode, // Renommez cette fonction
+    toggleAutoMode: simulationToggleAutoMode,
   } = useSimulation(dataSources, weatherSimulation$);
 
   const manualWaterLevel = ref(50);
@@ -257,176 +231,216 @@ export function useWaterSystem(): {
     } else {
       startSimulation();
     }
-    simulationToggleAutoMode(); // Utilisez la fonction renommée ici
+    simulationToggleAutoMode();
   };
 
-  // Modifier la souscription à dam$
-  dam$.pipe(takeUntil(destroy$)).subscribe((level) => {
-    if (!isManualMode.value) {
-      state.value.waterLevel = level;
-    }
-  });
+  function toggleAutoMode() {
+    isManualMode.value = false;
+  }
 
-  // Souscriptions
-  weatherSimulation$.pipe(takeUntil(destroy$)).subscribe((weather: WeatherCondition) => {
-    state.value.weatherCondition = weather;
-  });
+  // Optimisation des souscriptions
+  const optimizedSubscribe = <T>(
+    observable: Observable<T>,
+    next: (value: T) => void,
+    context: string,
+  ) => {
+    return observable
+      .pipe(
+        distinctUntilChanged(),
+        takeUntil(destroy$),
+        catchError((error) => handleError(error, context)),
+      )
+      .subscribe(next);
+  };
 
-  glacierMelt$.pipe(takeUntil(destroy$)).subscribe(({ volume, meltRate }) => {
-    state.value.glacierVolume = volume;
-    state.value.meltRate = meltRate;
-  });
+  // Utilisation de l'opérateur shareReplay pour les observables fréquemment utilisés
+  const sharedDam$ = dam$.pipe(shareReplay(1));
+  const sharedWeather$ = weatherSimulation$.pipe(shareReplay(1));
+  const sharedGlacierMelt$ = glacierMelt$.pipe(shareReplay(1));
+  const sharedPurificationPlant$ = purificationPlant$.pipe(shareReplay(1));
+  const sharedPowerPlant$ = powerPlant$.pipe(shareReplay(1));
+  const sharedIrrigation$ = irrigation$.pipe(shareReplay(1));
+  const sharedWastewaterTreatment$ = wastewaterTreatment$.pipe(shareReplay(1));
+  const sharedWaterQualityControl$ = waterQualityControl$.pipe(shareReplay(1));
+  const sharedFloodPrediction$ = floodPrediction$.pipe(shareReplay(1));
+  const sharedUserWaterManagement$ = userWaterManagement$.pipe(shareReplay(1));
+  const sharedWaterDistribution$ = waterDistribution$.pipe(shareReplay(1));
 
-  purificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
-    state.value.purifiedWater = water;
-  });
+  // Mise à jour des souscriptions pour utiliser les observables partagés
+  optimizedSubscribe(
+    sharedDam$,
+    (level) => {
+      if (!isManualMode.value) {
+        state.value.waterLevel = level;
+      }
+    },
+    'Souscription au niveau du barrage',
+  );
 
-  powerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
-    state.value.powerGenerated = power;
-  });
+  optimizedSubscribe(
+    sharedWeather$,
+    (weather) => {
+      state.value.weatherCondition = weather;
+    },
+    'Souscription aux conditions météorologiques',
+  );
 
-  irrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
-    state.value.irrigationWater = water;
-  });
+  optimizedSubscribe(
+    sharedGlacierMelt$,
+    ({ volume, meltRate }) => {
+      state.value.glacierVolume = volume;
+      state.value.meltRate = meltRate;
+    },
+    'Souscription à la fonte du glacier',
+  );
 
-  wastewaterTreatment$.pipe(takeUntil(destroy$)).subscribe((water) => {
-    state.value.treatedWastewater = water;
-  });
+  optimizedSubscribe(
+    sharedPurificationPlant$,
+    (water) => {
+      state.value.purifiedWater = water;
+    },
+    "Souscription à la purification de l'eau",
+  );
 
-  waterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
-    state.value.waterQuality = quality;
-  });
+  optimizedSubscribe(
+    sharedPowerPlant$,
+    (power) => {
+      state.value.powerGenerated = power;
+    },
+    "Souscription à la production d'énergie",
+  );
 
-  floodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
-    state.value.floodRisk = risk;
-  });
+  optimizedSubscribe(
+    sharedIrrigation$,
+    (water) => {
+      state.value.irrigationWater = water;
+    },
+    "Souscription à l'irrigation",
+  );
 
-  userWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
-    state.value.userConsumption = consumption;
-  });
+  optimizedSubscribe(
+    sharedWastewaterTreatment$,
+    (water) => {
+      state.value.treatedWastewater = water;
+    },
+    'Souscription au traitement des eaux usées',
+  );
 
-  waterDistribution$.pipe(takeUntil(destroy$)).subscribe((distributedWater) => {
-    state.value.waterDistributed = distributedWater;
+  optimizedSubscribe(
+    sharedWaterQualityControl$,
+    (quality) => {
+      state.value.waterQuality = quality;
+    },
+    "Souscription au contrôle de la qualité de l'eau",
+  );
 
-    // Ajoutez des alertes basées sur la distribution d'eau
-    if (distributedWater < 50) {
-      addAlert("Distribution d'eau faible", 'medium');
-    } else if (distributedWater > 500) {
-      addAlert("Distribution d'eau élevée", 'low');
-    }
-  });
+  optimizedSubscribe(
+    sharedFloodPrediction$,
+    (risk) => {
+      state.value.floodRisk = risk;
+    },
+    'Souscription à la prédiction des inondations',
+  );
 
-  // Ajoutez ces souscriptions
-  irrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
-    state.value.irrigationWater = water;
-    if (water > 1000) {
-      addAlert("Consommation d'eau pour l'irrigation élevée", 'medium');
-    }
-  });
+  optimizedSubscribe(
+    sharedUserWaterManagement$,
+    (consumption) => {
+      state.value.userConsumption = consumption;
+    },
+    "Souscription à la gestion de l'eau des utilisateurs",
+  );
 
-  powerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
-    state.value.powerGenerated = power;
-    if (power < 100) {
-      addAlert("Production d'énergie faible", 'medium');
-    } else if (power > 1000) {
-      addAlert("Production d'énergie exceptionnellement élevée", 'low');
-    }
-  });
+  optimizedSubscribe(
+    sharedWaterDistribution$,
+    (distributedWater) => {
+      state.value.waterDistributed = distributedWater;
 
-  userWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
-    state.value.userConsumption = consumption;
-    if (consumption > 500) {
-      addAlert("Consommation d'eau des utilisateurs élevée", 'medium');
-    }
-  });
+      // Ajoutez des alertes basées sur la distribution d'eau
+      if (distributedWater < 50) {
+        addAlert("Distribution d'eau faible", 'medium');
+      } else if (distributedWater > 500) {
+        addAlert("Distribution d'eau élevée", 'low');
+      }
+    },
+    "Souscription à la distribution d'eau",
+  );
 
-  // Réintégrer alertSystem$
+  // Mise à jour de alertSystem$ pour utiliser les observables partagés
   const alertSystem$ = merge(
-    dam$.pipe(
-      distinctUntilChanged(),
+    sharedDam$.pipe(
       map((level) => {
-        if (level >= 90) {
+        if (level >= 90)
           return {
             message: 'Alerte : Niveau du barrage critique! (90%+)',
             priority: 'high' as const,
           };
-        }
-        if (level >= 80) {
+        if (level >= 80)
           return {
             message: 'Avertissement : Niveau du barrage élevé (80%+)',
             priority: 'medium' as const,
           };
-        }
-        if (level <= 20) {
+        if (level <= 20)
           return {
             message: 'Alerte : Niveau du barrage très bas! (20% ou moins)',
             priority: 'high' as const,
           };
-        }
-        if (level <= 30) {
+        if (level <= 30)
           return {
             message: 'Avertissement : Niveau du barrage bas (30% ou moins)',
             priority: 'medium' as const,
           };
-        }
         return null;
       }),
       filter((alert): alert is Exclude<typeof alert, null> => alert !== null),
     ),
-    waterQualityControl$.pipe(
+    sharedWaterQualityControl$.pipe(
       filter((quality) => quality < 60),
       map(() => ({
         message: "Alerte : Qualité de l'eau en dessous des normes!",
         priority: 'high' as const,
       })),
     ),
-    floodPrediction$.pipe(
+    sharedFloodPrediction$.pipe(
       filter((risk) => risk > 80),
       map(() => ({ message: "Alerte : Risque élevé d'inondation!", priority: 'high' as const })),
     ),
-    waterDistribution$.pipe(
+    sharedWaterDistribution$.pipe(
       filter((water) => water < 50),
-      map(() => ({
-        message: "Alerte : Distribution d'eau faible",
-        priority: 'medium' as const,
-      })),
+      map(() => ({ message: "Alerte : Distribution d'eau faible", priority: 'medium' as const })),
     ),
-    waterDistribution$.pipe(
+    sharedWaterDistribution$.pipe(
       filter((water) => water > 500),
-      map(() => ({
-        message: "Information : Distribution d'eau élevée",
-        priority: 'low' as const,
-      })),
+      map(() => ({ message: "Information : Distribution d'eau élevée", priority: 'low' as const })),
     ),
-    irrigation$.pipe(
+    sharedIrrigation$.pipe(
       filter((water) => water > 1000),
       map(() => ({
         message: "Alerte : Consommation d'eau pour l'irrigation élevée",
         priority: 'medium' as const,
       })),
     ),
-    powerPlant$.pipe(
+    sharedPowerPlant$.pipe(
       filter((power) => power < 100),
-      map(() => ({
-        message: "Alerte : Production d'énergie faible",
-        priority: 'medium' as const,
-      })),
+      map(() => ({ message: "Alerte : Production d'énergie faible", priority: 'medium' as const })),
     ),
-    powerPlant$.pipe(
+    sharedPowerPlant$.pipe(
       filter((power) => power > 1000),
       map(() => ({
         message: "Information : Production d'énergie exceptionnellement élevée",
         priority: 'low' as const,
       })),
     ),
-    userWaterManagement$.pipe(
+    sharedUserWaterManagement$.pipe(
       filter((consumption) => consumption > 500),
       map(() => ({
         message: "Alerte : Consommation d'eau des utilisateurs élevée",
         priority: 'medium' as const,
       })),
     ),
-  ).pipe(map(({ message, priority }) => addAlert(message, priority)));
+  ).pipe(
+    tap(({ message, priority }) => addAlert(message, priority)),
+    shareReplay(1),
+  );
 
   // S'abonner à alertSystem$
   alertSystem$.pipe(takeUntil(destroy$)).subscribe();
@@ -554,23 +568,31 @@ export function useWaterSystem(): {
     return state.value.purifiedWater + state.value.waterDistributed;
   }, 1000); // Calcul au maximum une fois par seconde
 
-  const totalWaterProcessed = computed(
-    waterSystemConfig.enablePerformanceLogs
-      ? measureReactivePerformance('totalWaterProcessed', throttledTotalWaterProcessed)
-      : throttledTotalWaterProcessed,
-  );
+  const totalWaterProcessed = computed(() => {
+    if (waterSystemConfig.enablePerformanceLogs) {
+      console.time('totalWaterProcessed');
+      const result = throttledTotalWaterProcessed();
+      console.timeEnd('totalWaterProcessed');
+      return result;
+    }
+    return throttledTotalWaterProcessed();
+  });
 
   const throttledSystemEfficiency = throttle(() => {
     const processedWater = totalWaterProcessed.value;
-    if (processedWater === undefined || processedWater === 0) return 0;
+    if (processedWater === 0) return 0;
     return (state.value.purifiedWater / processedWater) * 100;
   }, 1000);
 
-  const systemEfficiency = computed(
-    waterSystemConfig.enablePerformanceLogs
-      ? measureReactivePerformance('systemEfficiency', throttledSystemEfficiency)
-      : throttledSystemEfficiency,
-  );
+  const systemEfficiency = computed(() => {
+    if (waterSystemConfig.enablePerformanceLogs) {
+      console.time('systemEfficiency');
+      const result = throttledSystemEfficiency();
+      console.timeEnd('systemEfficiency');
+      return result;
+    }
+    return throttledSystemEfficiency();
+  });
 
   const overallSystemStatus = computed(() => {
     if (state.value.waterLevel < 20 || state.value.waterQuality < 50) {
@@ -600,37 +622,37 @@ export function useWaterSystem(): {
   return {
     state: computed(() => state.value),
     observables: {
-      waterLevel: dam$,
-      purifiedWater: purificationPlant$,
-      powerGenerated: powerPlant$,
-      waterDistributed: waterDistribution$,
-      weatherCondition: weatherSimulation$,
+      waterLevel: sharedDam$,
+      purifiedWater: sharedPurificationPlant$,
+      powerGenerated: sharedPowerPlant$,
+      waterDistributed: sharedWaterDistribution$,
+      weatherCondition: sharedWeather$,
       alerts: alertsObservable$,
-      irrigationWater: irrigation$,
-      treatedWastewater: wastewaterTreatment$,
-      waterQuality: waterQualityControl$,
-      floodRisk: floodPrediction$,
-      userConsumption: userWaterManagement$,
-      glacierVolume: glacierMelt$.pipe(map(({ volume }) => volume)),
-      meltRate: glacierMelt$.pipe(map(({ meltRate }) => meltRate)),
-      isAutoMode: isAutoMode as unknown as Observable<boolean>, // Cast isAutoMode to Observable<boolean>
+      irrigationWater: sharedIrrigation$,
+      treatedWastewater: sharedWastewaterTreatment$,
+      waterQuality: sharedWaterQualityControl$,
+      floodRisk: sharedFloodPrediction$,
+      userConsumption: sharedUserWaterManagement$,
+      glacierVolume: sharedGlacierMelt$.pipe(map(({ volume }) => volume)),
+      meltRate: sharedGlacierMelt$.pipe(map(({ meltRate }) => meltRate)),
+      isAutoMode: isAutoMode as unknown as Observable<boolean>,
     },
     simulationControls: {
-      isAutoMode: isAutoMode.value, // Retourner la valeur booléenne directement
+      isAutoMode: isAutoMode.value,
       startSimulation,
       stopSimulation,
-      toggleAutoMode: simulationToggleAutoMode, // Utilisez la fonction renommée ici
+      toggleAutoMode: simulationToggleAutoMode,
     },
     resetSystem,
     setWaterLevel,
-    toggleManualMode, // Ajout de toggleManualMode ici
-    totalWaterProcessed: totalWaterProcessed as Ref<number>,
-    systemEfficiency: systemEfficiency as Ref<number>,
+    totalWaterProcessed,
+    systemEfficiency,
     overallSystemStatus,
     alerts,
     addAlert,
     currentWaterLevel,
     isManualMode: computed(() => isManualMode.value),
-    toggleManualMode, // Ajoutez cette ligne
+    toggleManualMode,
+    toggleAutoMode,
   };
 }

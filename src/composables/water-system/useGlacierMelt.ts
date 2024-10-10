@@ -6,7 +6,7 @@ import { catchError, distinctUntilChanged, map, shareReplay, tap } from 'rxjs/op
 
 export function useGlacierMelt(
   weatherSource$: Observable<WeatherCondition>,
-  glacierSource$: Subject<number>, // Changé de Observable<number> à Subject<number>
+  glacierSource$: Subject<number>,
 ) {
   const glacierMelt$ = interval(1000).pipe(
     withLatestFrom(weatherSource$, glacierSource$),
@@ -27,9 +27,12 @@ export function useGlacierMelt(
           break;
       }
       const newVolume = Math.max(0, volume - meltRate);
-      return { volume: newVolume, meltRate };
+      const waterFlow = meltRate; // Nouveau : débit d'eau provenant de la fonte
+      return { volume: newVolume, meltRate, waterFlow };
     }),
-    distinctUntilChanged((prev, curr) => prev.volume === curr.volume),
+    distinctUntilChanged(
+      (prev, curr) => prev.volume === curr.volume && prev.waterFlow === curr.waterFlow,
+    ),
     tap(({ volume }) => glacierSource$.next(volume)),
     catchError((error) => handleError(error, 'Simulation de fonte du glacier')),
     shareReplay(1),

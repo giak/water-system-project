@@ -24,6 +24,8 @@
       <DamComponent 
         :current-water-level="currentWaterLevel"
         :is-manual-mode="isManualMode"
+        :glacier-inflow="state.waterFlow"
+        :water-volume="state.damWaterVolume"  
         @update:water-level="setWaterLevel"
         @toggle-manual-mode="toggleManualMode"
         @reset-system="resetSystem"
@@ -32,7 +34,7 @@
       <PowerPlantComponent :power-generated="state.powerGenerated" />
       <DistributionComponent 
         :water-distributed="state.waterDistributed" 
-        :water-level="state.waterLevel" 
+        :water-level="currentWaterLevel" 
       />
       <WeatherStationComponent :weather-condition="state.weatherCondition" />
       <IrrigationComponent :irrigation-water="state.irrigationWater" />
@@ -79,12 +81,11 @@ const {
   currentWaterLevel,
   setWaterLevel,
   toggleManualMode,
-  isManualMode, // Utilisez directement isManualMode ici
+  isManualMode,
   resetSystem,
   totalWaterProcessed,
   systemEfficiency,
   overallSystemStatus,
   alerts,
-  addAlert,
 } = useWaterSystem();
 </script>

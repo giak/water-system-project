@@ -36,8 +36,7 @@ export function useGlacierMelt(
           break;
       }
       const newVolume = Math.max(0, volume - meltRate);
-      // Calcul du débit d'eau en tenant compte d'un facteur d'ajustement
-      const waterFlow = meltRate * WATER_FLOW_ADJUSTMENT;
+      const waterFlow = meltRate; // Le débit d'eau est égal au taux de fonte
       return { volume: newVolume, meltRate, waterFlow };
     }),
     distinctUntilChanged(

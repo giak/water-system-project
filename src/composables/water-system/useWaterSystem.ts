@@ -182,7 +182,7 @@ export function useWaterSystem(): {
    * - meltRate : Le taux de fonte du glacier.
    */
   const state = ref<WaterSystemState>({
-    waterLevel: waterSystemConfig.INITIAL_WATER_LEVEL,
+    waterLevel: waterSystemConfig.INITIAL_DAM_WATER_LEVEL, // Utiliser la nouvelle constante
     isAutoMode: true,
     purifiedWater: waterSystemConfig.INITIAL_PURIFIED_WATER,
     powerGenerated: waterSystemConfig.INITIAL_POWER_GENERATED,
@@ -197,6 +197,7 @@ export function useWaterSystem(): {
     glacierVolume: waterSystemConfig.INITIAL_GLACIER_VOLUME,
     meltRate: waterSystemConfig.INITIAL_MELT_RATE,
     waterFlow: waterSystemConfig.INITIAL_WATER_FLOW,
+    damWaterVolume: waterSystemConfig.INITIAL_DAM_WATER_VOLUME,
   });
 
   /**
@@ -249,11 +250,14 @@ export function useWaterSystem(): {
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
    */
-  const { dam$ } = useDamManagement(
+  const { dam$, setInitialWaterLevel, damWaterVolume } = useDamManagement(
     dataSources.waterSource$,
     dataSources.weatherSource$,
     glacierMelt$,
   );
+
+  // Initialiser le niveau d'eau du barrage à 70%
+  setInitialWaterLevel(waterSystemConfig.INITIAL_DAM_WATER_LEVEL);
 
   /**
    * Simulation de l'usine de purification de l'eau.
@@ -366,7 +370,7 @@ export function useWaterSystem(): {
 
   /**
    * Indique si le système est en mode manuel.
-   * Lorsque true, le système utilise manualWaterLevel au lieu des valeurs simulées.
+   * Lorsque true, le système utilise manualWaterLevel au lieu des valeurs simules.
    *
    * @type {Ref<boolean>}
    */
@@ -468,6 +472,21 @@ export function useWaterSystem(): {
   const sharedFloodPrediction$ = floodPrediction$.pipe(shareReplay(1));
   const sharedUserWaterManagement$ = userWaterManagement$.pipe(shareReplay(1));
   const sharedWaterDistribution$ = waterDistribution$.pipe(shareReplay(1));
+
+  // Convertir le Ref<number> en Observable<number>
+  const damWaterVolume$ = new Observable<number>((subscriber) => {
+    const unwatch = watch(
+      damWaterVolume,
+      (newValue) => {
+        subscriber.next(newValue);
+      },
+      { immediate: true },
+    );
+
+    return () => {
+      unwatch();
+    };
+  });
 
   /**
    * Souscription aux observables partagés.
@@ -795,7 +814,7 @@ export function useWaterSystem(): {
 
     // Réinitialiser tous les états réactifs à leurs valeurs initiales
     state.value = {
-      waterLevel: waterSystemConfig.INITIAL_WATER_LEVEL,
+      waterLevel: waterSystemConfig.INITIAL_DAM_WATER_LEVEL, // Utiliser la nouvelle constante
       purifiedWater: waterSystemConfig.INITIAL_PURIFIED_WATER,
       powerGenerated: waterSystemConfig.INITIAL_POWER_GENERATED,
       waterDistributed: waterSystemConfig.INITIAL_WATER_DISTRIBUTED,
@@ -810,7 +829,11 @@ export function useWaterSystem(): {
       meltRate: waterSystemConfig.INITIAL_MELT_RATE,
       isAutoMode: true,
       waterFlow: waterSystemConfig.INITIAL_WATER_FLOW,
+      damWaterVolume: waterSystemConfig.INITIAL_DAM_WATER_VOLUME,
     };
+
+    // Réinitialiser le niveau d'eau du barrage à 70%
+    setInitialWaterLevel(waterSystemConfig.INITIAL_DAM_WATER_LEVEL);
 
     // Réinitialiser toutes les sources de données
     dataSources.waterSource$.next(waterSystemConfig.INITIAL_WATER_LEVEL);
@@ -1050,6 +1073,15 @@ export function useWaterSystem(): {
     };
   });
 
+  // Mettre à jour le volume d'eau du barrage chaque fois que le niveau d'eau change
+  watch(
+    () => state.value.waterLevel,
+    (newWaterLevel) => {
+      state.value.damWaterVolume =
+        (newWaterLevel / 100) * waterSystemConfig.INITIAL_DAM_WATER_VOLUME;
+    },
+  );
+
   /**
    * Retourner les données du système d'eau.
    *
@@ -1076,6 +1108,7 @@ export function useWaterSystem(): {
       meltRate: sharedGlacierMelt$.pipe(map(({ meltRate }) => meltRate)),
       waterFlow: sharedGlacierMelt$.pipe(map(({ waterFlow }) => waterFlow)),
       isAutoMode: isAutoMode as unknown as Observable<boolean>,
+      damWaterVolume: sharedDam$,
     },
     simulationControls: {
       isAutoMode: isAutoMode.value,

@@ -19,6 +19,7 @@ export interface WaterSystemState {
   glacierVolume: number;
   meltRate: number;
   waterFlow: number;
+  damWaterVolume: number; // Ajout de cette ligne
 }
 
 export interface Alert {

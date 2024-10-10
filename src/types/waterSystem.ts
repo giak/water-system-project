@@ -18,6 +18,7 @@ export interface WaterSystemState {
   isAutoMode: boolean;
   glacierVolume: number;
   meltRate: number;
+  waterFlow: number;
 }
 
 export interface Alert {
@@ -53,6 +54,8 @@ export type WaterSystemObservables = {
   [K in keyof WaterSystemState]: K extends 'alerts'
     ? Observable<Alert[]>
     : Observable<WaterSystemState[K]>;
+} & {
+  waterFlow: Observable<number>;
 };
 
 export interface WaterSystemComposable {

@@ -139,7 +139,7 @@ export function useWaterSystem(): {
 } {
   /**
    * Subject pour gérer la destruction du composable.
-   * Utilisé pour nettoyer les souscriptions lors de la destruction du composable.
+   * Utilis pour nettoyer les souscriptions lors de la destruction du composable.
    *
    * @type {Subject<void>}
    */
@@ -196,6 +196,7 @@ export function useWaterSystem(): {
     userConsumption: waterSystemConfig.INITIAL_USER_CONSUMPTION,
     glacierVolume: waterSystemConfig.INITIAL_GLACIER_VOLUME,
     meltRate: waterSystemConfig.INITIAL_MELT_RATE,
+    waterFlow: waterSystemConfig.INITIAL_WATER_FLOW,
   });
 
   /**
@@ -395,7 +396,7 @@ export function useWaterSystem(): {
 
   /**
    * Bascule entre le mode manuel et automatique.
-   * Arrête ou démarre la simulation en fonction du mode.   * 
+   * Arrête ou démarre la simulation en fonction du mode.   *
    */
   const toggleManualMode = (): void => {
     isManualMode.value = !isManualMode.value;
@@ -419,7 +420,7 @@ export function useWaterSystem(): {
    * Optimise la souscription à un Observable en appliquant des opérateurs RxJS communs.
    *
    * @param {Observable<T>} observable - L'Observable à optimiser
-   * @param {function} next - La fonction à exécuter pour chaque valeur émise
+   * @param {function} next - La fonction à exécuter pour chaque valeur mise
    * @param {string} context - Le contexte de la souscription pour la gestion des erreurs
    *
    * @description
@@ -512,9 +513,10 @@ export function useWaterSystem(): {
    */
   optimizedSubscribe(
     sharedGlacierMelt$,
-    ({ volume, meltRate }) => {
+    ({ volume, meltRate, waterFlow }) => {
       state.value.glacierVolume = volume;
       state.value.meltRate = meltRate;
+      state.value.waterFlow = waterFlow;
     },
     'Souscription à la fonte du glacier',
   );
@@ -737,6 +739,23 @@ export function useWaterSystem(): {
         priority: 'medium' as const,
       })),
     ),
+    // Nouvelle alerte pour un débit d'eau élevé du glacier
+    sharedGlacierMelt$.pipe(
+      filter(({ waterFlow }) => waterFlow > waterSystemConfig.HIGH_GLACIER_WATER_FLOW),
+      map(() => ({
+        message: "Alerte : Débit d'eau élevé provenant du glacier",
+        priority: 'medium' as const,
+      })),
+    ),
+
+    // Nouvelle alerte pour un débit d'eau critique du glacier
+    sharedGlacierMelt$.pipe(
+      filter(({ waterFlow }) => waterFlow > waterSystemConfig.CRITICAL_GLACIER_WATER_FLOW),
+      map(() => ({
+        message: "Alerte critique : Débit d'eau très élevé provenant du glacier",
+        priority: 'high' as const,
+      })),
+    ),
   ).pipe(
     /**
      * Ajoute des alertes en fonction des messages et priorités générés.
@@ -761,6 +780,7 @@ export function useWaterSystem(): {
    * 4. Force une mise à jour immédiate de certaines valeurs.
    * 5. Recrée toutes les souscriptions.
    * 6. Redémarre la simulation.
+   * 7. Forcer une mise à jour de tous les composants.
    *
    * Pourquoi c'est ainsi fait :
    * - Assure un état cohérent du système après la réinitialisation.
@@ -789,6 +809,7 @@ export function useWaterSystem(): {
       glacierVolume: waterSystemConfig.INITIAL_GLACIER_VOLUME,
       meltRate: waterSystemConfig.INITIAL_MELT_RATE,
       isAutoMode: true,
+      waterFlow: waterSystemConfig.INITIAL_WATER_FLOW,
     };
 
     // Réinitialiser toutes les sources de données
@@ -864,10 +885,22 @@ export function useWaterSystem(): {
         state.value.waterDistributed = water;
       }),
 
-      sharedGlacierMelt$.pipe(takeUntil(destroy$)).subscribe(({ volume, meltRate: rate }) => {
-        state.value.glacierVolume = volume;
-        state.value.meltRate = rate;
-      }),
+      /**
+       * Souscription au débit d'eau du glacier.
+       * @param {number} volume - Le volume d'eau du glacier.
+       * @param {number} meltRate - Le taux de fonte du glacier.
+       * @param {number} waterFlow - Le débit d'eau du glacier.
+       * @description
+       * Cette fonction met à jour l'état du système avec les valeurs du débit d'eau du glacier.
+       * Elle permet de suivre l'évolution du débit d'eau du glacier et de gérer les alertes en conséquence.
+       */
+      sharedGlacierMelt$
+        .pipe(takeUntil(destroy$))
+        .subscribe(({ volume, meltRate: rate, waterFlow: flow }) => {
+          state.value.glacierVolume = volume;
+          state.value.meltRate = rate;
+          state.value.waterFlow = flow;
+        }),
     ];
 
     // Redémarrer la simulation
@@ -920,7 +953,6 @@ export function useWaterSystem(): {
    * @description
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   * 
    */
   const totalWaterProcessed = computed(() => {
     if (waterSystemConfig.enablePerformanceLogs) {
@@ -938,7 +970,6 @@ export function useWaterSystem(): {
    * @description
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   * 
    */
   const memoizedSystemEfficiency = computed(() => {
     const processedWater = memoizedTotalWaterProcessed.value;
@@ -964,7 +995,6 @@ export function useWaterSystem(): {
    * @description
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   * 
    */
   const systemEfficiency = computed(() => {
     if (waterSystemConfig.enablePerformanceLogs) {
@@ -982,7 +1012,6 @@ export function useWaterSystem(): {
    * @description
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   * 
    */
   const overallSystemStatus = computed(() => {
     if (
@@ -1006,7 +1035,6 @@ export function useWaterSystem(): {
    * @description
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   * 
    */
   const alertsObservable$ = new Observable<Alert[]>((subscriber) => {
     const unwatch = watch(
@@ -1028,7 +1056,7 @@ export function useWaterSystem(): {
    * @description
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   * 
+   *
    */
   return {
     state: computed(() => state.value),
@@ -1046,6 +1074,7 @@ export function useWaterSystem(): {
       userConsumption: sharedUserWaterManagement$,
       glacierVolume: sharedGlacierMelt$.pipe(map(({ volume }) => volume)),
       meltRate: sharedGlacierMelt$.pipe(map(({ meltRate }) => meltRate)),
+      waterFlow: sharedGlacierMelt$.pipe(map(({ waterFlow }) => waterFlow)),
       isAutoMode: isAutoMode as unknown as Observable<boolean>,
     },
     simulationControls: {

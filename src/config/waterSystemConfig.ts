@@ -13,6 +13,7 @@ export const waterSystemConfig = {
   INITIAL_TREATED_WASTEWATER: 0,
   INITIAL_USER_CONSUMPTION: 0,
   INITIAL_MELT_RATE: 0,
+  INITIAL_WATER_FLOW: 0,
 
   // Constants for thresholds
   CRITICAL_WATER_LEVEL: 20,
@@ -36,4 +37,8 @@ export const waterSystemConfig = {
   SEASONAL_FACTOR_PERIOD: 1000 * 60 * 60 * 24 * 30, // Approximately one month in milliseconds
   BASE_WATER_INPUT_MIN: 20,
   BASE_WATER_INPUT_MAX: 60,
+
+  // New constants for glacier water flow
+  HIGH_GLACIER_WATER_FLOW: 50, // Exemple de valeur, à ajuster selon vos besoins
+  CRITICAL_GLACIER_WATER_FLOW: 80, // Exemple de valeur, à ajuster selon vos besoins
 };

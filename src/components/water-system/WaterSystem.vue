@@ -18,7 +18,8 @@
     <div class="water-system__components">
       <GlacierComponent 
         :glacier-volume="state.glacierVolume" 
-        :melt-rate="state.meltRate" 
+        :melt-rate="state.meltRate"
+        :water-flow="state.waterFlow" 
       />
       <DamComponent 
         :current-water-level="currentWaterLevel"

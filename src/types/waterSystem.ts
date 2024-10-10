@@ -1,4 +1,4 @@
-import type { Subject, Observable } from 'rxjs';
+import type { Observable, Subject } from 'rxjs';
 
 export type WeatherCondition = 'ensoleillé' | 'nuageux' | 'pluvieux' | 'orageux';
 
@@ -49,7 +49,7 @@ export interface SimulationControls {
 }
 
 export type WaterSystemObservables = {
-  [K in keyof WaterSystemState]: K extends 'alerts' 
-    ? Observable<Alert[]> 
+  [K in keyof WaterSystemState]: K extends 'alerts'
+    ? Observable<Alert[]>
     : Observable<WaterSystemState[K]>;
 };

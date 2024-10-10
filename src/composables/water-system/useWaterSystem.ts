@@ -163,11 +163,15 @@ export function useWaterSystem(): {
   simulationControls: SimulationControls;
   resetSystem: () => void;
   setWaterLevel: (level: number) => void;
+  toggleAutoMode: () => void;
   totalWaterProcessed: Ref<number>;
   systemEfficiency: Ref<number>;
   overallSystemStatus: Ref<string>;
   alerts: Ref<Alert[]>;
   addAlert: (message: string, priority: Alert['priority']) => void;
+  currentWaterLevel: Ref<number>;
+  toggleManualMode: () => void;
+  isManualMode: Ref<boolean>; // Ajoutez cette ligne
 } {
   const destroy$ = new Subject<void>();
   const { alerts, addAlert } = useAlertSystem();
@@ -175,17 +179,17 @@ export function useWaterSystem(): {
   // États réactifs
   const state = ref<WaterSystemState>({
     waterLevel: 50,
+    isAutoMode: true,
     purifiedWater: 0,
     powerGenerated: 0,
     waterDistributed: 0,
-    weatherCondition: 'ensoleillé',
+    weatherCondition: 'ensoleillé' as WeatherCondition, // Spécifiez le type ici
     alerts: [],
     irrigationWater: 0,
     treatedWastewater: 0,
     waterQuality: 90,
     floodRisk: 10,
     userConsumption: 0,
-    isAutoMode: true,
     glacierVolume: 1000000,
     meltRate: 0,
   });
@@ -224,23 +228,53 @@ export function useWaterSystem(): {
   );
   const { waterDistribution$ } = useWaterDistribution(dam$);
 
-  const { isAutoMode, startSimulation, stopSimulation, toggleAutoMode } = useSimulation(
-    dataSources,
-    weatherSimulation$,
-  );
+  const {
+    isAutoMode,
+    startSimulation,
+    stopSimulation,
+    toggleAutoMode: simulationToggleAutoMode, // Renommez cette fonction
+  } = useSimulation(dataSources, weatherSimulation$);
+
+  const manualWaterLevel = ref(50);
+  const isManualMode = ref(false);
+
+  const currentWaterLevel = computed(() => {
+    return isManualMode.value ? manualWaterLevel.value : state.value.waterLevel;
+  });
+
+  const setWaterLevel = (level: number) => {
+    if (isManualMode.value) {
+      manualWaterLevel.value = level;
+      state.value.waterLevel = level;
+    }
+  };
+
+  const toggleManualMode = () => {
+    isManualMode.value = !isManualMode.value;
+    if (isManualMode.value) {
+      stopSimulation();
+      manualWaterLevel.value = state.value.waterLevel;
+    } else {
+      startSimulation();
+    }
+    simulationToggleAutoMode(); // Utilisez la fonction renommée ici
+  };
+
+  // Modifier la souscription à dam$
+  dam$.pipe(takeUntil(destroy$)).subscribe((level) => {
+    if (!isManualMode.value) {
+      state.value.waterLevel = level;
+    }
+  });
 
   // Souscriptions
-  weatherSimulation$.pipe(takeUntil(destroy$)).subscribe((weather) => {
+  weatherSimulation$.pipe(takeUntil(destroy$)).subscribe((weather: WeatherCondition) => {
     state.value.weatherCondition = weather;
   });
 
   glacierMelt$.pipe(takeUntil(destroy$)).subscribe(({ volume, meltRate }) => {
     state.value.glacierVolume = volume;
     state.value.meltRate = meltRate;
-  });
-
-  dam$.pipe(takeUntil(destroy$)).subscribe((level) => {
-    state.value.waterLevel = level;
   });
 
   purificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
@@ -410,7 +444,7 @@ export function useWaterSystem(): {
       purifiedWater: 0,
       powerGenerated: 0,
       waterDistributed: 0,
-      weatherCondition: 'ensoleillé',
+      weatherCondition: 'ensoleillé' as WeatherCondition,
       alerts: [],
       irrigationWater: 0,
       treatedWastewater: 0,
@@ -504,13 +538,6 @@ export function useWaterSystem(): {
     });
   }
 
-  function setWaterLevel(level: number) {
-    if (!isAutoMode.value) {
-      state.value.waterLevel = level;
-      dataSources.waterSource$.next(level);
-    }
-  }
-
   onMounted(() => {
     resetSystem(); // Initialiser le système au montage
   });
@@ -571,7 +598,7 @@ export function useWaterSystem(): {
   });
 
   return {
-    state,
+    state: computed(() => state.value),
     observables: {
       waterLevel: dam$,
       purifiedWater: purificationPlant$,
@@ -589,17 +616,21 @@ export function useWaterSystem(): {
       isAutoMode: isAutoMode as unknown as Observable<boolean>, // Cast isAutoMode to Observable<boolean>
     },
     simulationControls: {
-      isAutoMode: isAutoMode.value,
+      isAutoMode: isAutoMode.value, // Retourner la valeur booléenne directement
       startSimulation,
       stopSimulation,
-      toggleAutoMode,
+      toggleAutoMode: simulationToggleAutoMode, // Utilisez la fonction renommée ici
     },
     resetSystem,
     setWaterLevel,
-    totalWaterProcessed: totalWaterProcessed as Ref<number>, // Cast to Ref<number>
-    systemEfficiency: systemEfficiency as Ref<number>, // Cast to Ref<number>
+    toggleManualMode, // Ajout de toggleManualMode ici
+    totalWaterProcessed: totalWaterProcessed as Ref<number>,
+    systemEfficiency: systemEfficiency as Ref<number>,
     overallSystemStatus,
     alerts,
     addAlert,
+    currentWaterLevel,
+    isManualMode: computed(() => isManualMode.value),
+    toggleManualMode, // Ajoutez cette ligne
   };
 }

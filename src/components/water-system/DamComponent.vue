@@ -4,7 +4,7 @@
       <i class="pi pi-shield mr-2"></i>
       Barrage
     </h3>
-    <div class="water-level" :style="{ height: `${waterLevel}%` }"></div>
+    <div class="water-level" :style="{ height: `${currentWaterLevel}%` }"></div>
     <p class="water-level-info">
       Niveau d'eau: {{ formattedWaterLevel }}%
       <TrendArrow :trend="waterLevelTrend" />
@@ -17,10 +17,10 @@
         step="1"
         v-model.number="localWaterLevel"
         @input="updateWaterLevel"
-        :disabled="isAutoMode"
+        :disabled="!isManualMode"
       >
-      <button @click="toggleAutoMode" class="btn btn--mode">
-        {{ isAutoMode ? 'Mode manuel' : 'Mode automatique' }}
+      <button @click="toggleManualMode" :class="['btn', isManualMode ? 'btn--manual' : 'btn--auto']">
+        {{ isManualMode ? 'Mode manuel' : 'Mode automatique' }}
       </button>
       <button @click="resetSystem" class="btn btn--reset">RESET</button>
     </div>
@@ -32,40 +32,50 @@ import { computed, ref, watch } from 'vue';
 import TrendArrow from './TrendArrow.vue';
 
 const props = defineProps<{
-  waterLevel: number;
-  isAutoMode: boolean;
+  currentWaterLevel: number;
+  isManualMode: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:waterLevel', value: number): void;
-  (e: 'toggleAutoMode'): void;
-  (e: 'resetSystem'): void;
+  (e: 'update:water-level', value: number): void;
+  (e: 'toggle-manual-mode'): void;
+  (e: 'reset-system'): void;
 }>();
 
-const localWaterLevel = ref(props.waterLevel);
-const previousWaterLevel = ref(props.waterLevel);
+const localWaterLevel = ref(props.currentWaterLevel);
+
+const formattedWaterLevel = computed(() => props.currentWaterLevel.toFixed(2));
+
 const waterLevelTrend = ref(0);
 
-const formattedWaterLevel = computed(() => props.waterLevel.toFixed(2));
-
-watch(
-  () => props.waterLevel,
-  (newValue, oldValue) => {
-    localWaterLevel.value = newValue;
-    waterLevelTrend.value = newValue - oldValue;
-    previousWaterLevel.value = newValue;
-  },
-);
+watch(() => props.currentWaterLevel, (newValue, oldValue) => {
+  localWaterLevel.value = newValue;
+  waterLevelTrend.value = newValue - oldValue;
+});
 
 const updateWaterLevel = () => {
-  emit('update:waterLevel', localWaterLevel.value);
+  if (props.isManualMode) {
+    emit('update:water-level', localWaterLevel.value);
+  }
 };
 
-const toggleAutoMode = () => {
-  emit('toggleAutoMode');
+const toggleManualMode = () => {
+  emit('toggle-manual-mode');
 };
 
 const resetSystem = () => {
-  emit('resetSystem');
+  emit('reset-system');
 };
 </script>
+
+<style scoped>
+.btn--auto {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.btn--manual {
+  background-color: #f44336;
+  color: white;
+}
+</style>

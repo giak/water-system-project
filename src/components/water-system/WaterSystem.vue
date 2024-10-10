@@ -14,10 +14,10 @@
         :melt-rate="state.meltRate" 
       />
       <DamComponent 
-        :water-level="state.waterLevel" 
-        :is-auto-mode="simulationControls.isAutoMode"
+        :current-water-level="currentWaterLevel"
+        :is-manual-mode="isManualMode"
         @update:water-level="setWaterLevel"
-        @toggle-auto-mode="simulationControls.toggleAutoMode"
+        @toggle-manual-mode="toggleManualMode"
         @reset-system="resetSystem"
       />
       <PurificationPlantComponent :purified-water="state.purifiedWater" />
@@ -56,9 +56,11 @@ import WeatherStationComponent from './WeatherStationComponent.vue';
 
 const {
   state,
-  resetSystem,
+  currentWaterLevel,
   setWaterLevel,
-  simulationControls,
+  toggleManualMode,
+  isManualMode, // Utilisez directement isManualMode ici
+  resetSystem,
   totalWaterProcessed,
   systemEfficiency,
   overallSystemStatus,

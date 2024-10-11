@@ -1,5 +1,6 @@
 export const waterSystemConfig = {
-  enablePerformanceLogs: false, // Changez à true pour activer les logs
+  enablePerformanceLogs: false,
+  enableWaterSystemLogs: true,
 
   // Constants for system initialization
   INITIAL_WATER_LEVEL: 50,

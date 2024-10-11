@@ -30,11 +30,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import AlertItem from './AlertItem.vue';
-import type { Alert } from '@/types/waterSystem';
 import { useWaterSystem } from '@/composables/water-system/useWaterSystem';
 import { waterSystemConfig } from '@/config/waterSystemConfig';
+import type { Alert } from '@/types/waterSystem';
+import { computed, ref, watch } from 'vue';
+import AlertItem from './AlertItem.vue';
 
 // Utilisez le composable useWaterSystem
 const { alerts } = useWaterSystem();

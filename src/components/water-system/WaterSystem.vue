@@ -8,13 +8,6 @@
         <p>Total d'eau traitée : {{ totalWaterProcessed?.toFixed(2) ?? 'N/A' }} m³</p>
       </div>
     </div>
-    <SystemControls
-      :current-water-level="currentWaterLevel"
-      :is-manual-mode="isManualMode"
-      @update:water-level="setWaterLevel"
-      @toggle-manual-mode="toggleManualMode"
-      @reset-system="resetSystem"
-    />
     <div class="water-system__components">
       <GlacierComponent 
         :glacier-volume="state.glacierVolume" 
@@ -46,6 +39,7 @@
     <div class="water-system__alerts">
       <AlertSystem :alerts="alerts" />
     </div>
+    <WaterSourceLogs />
   </div>
 </template>
 
@@ -55,7 +49,7 @@ import { defineAsyncComponent } from 'vue';
 import AlertSystem from './AlertSystem.vue';
 import DamComponent from './DamComponent.vue';
 import DistributionComponent from './DistributionComponent.vue';
-import SystemControls from './SystemControls.vue';
+import WaterSourceLogs from './WaterSourceLogs.vue'; // Ajout de cette ligne
 
 // Composants chargés de manière asynchrone
 const FloodPredictionComponent = defineAsyncComponent(

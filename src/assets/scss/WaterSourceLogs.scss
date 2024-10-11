@@ -1,0 +1,40 @@
+.water-source-logs {
+    @apply bg-gray-900 rounded-lg overflow-hidden mt-4 text-xs;
+
+    .terminal-header {
+        @apply bg-gray-800 px-2 py-1 flex items-center;
+    }
+
+    .terminal-title {
+        @apply text-gray-400 font-bold;
+    }
+
+    .log-container {
+        @apply p-1 max-h-48 overflow-y-auto;
+    }
+
+    .log-grid {
+        @apply grid gap-2;
+        grid-template-columns: minmax(180px, auto) minmax(80px, auto) minmax(100px, auto);
+    }
+
+    .log-timestamp {
+        @apply text-gray-500;
+    }
+
+    .log-source {
+        @apply text-blue-400;
+    }
+
+    .log-amount {
+        @apply text-yellow-300 text-right;
+    }
+
+    .inflow {
+        @apply text-green-400;
+    }
+    
+    .outflow {
+        @apply text-red-400;
+    }
+}

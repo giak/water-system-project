@@ -76,3 +76,10 @@ export interface WaterSystemComposable {
   toggleManualMode: () => void;
   toggleAutoMode: () => void; // Add this line
 }
+
+export interface WaterSourceLogEntry {
+  timestamp: number;
+  source: string;
+  amount: number; // Peut être positif (entrée) ou négatif (sortie)
+  weather?: WeatherCondition;
+}

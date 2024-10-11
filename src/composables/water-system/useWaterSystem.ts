@@ -11,6 +11,7 @@ import type {
   Alert,
   DataSources,
   SimulationControls,
+  WaterSourceLogEntry, // Ajout de cette ligne
   WaterSystemObservables,
   WaterSystemState,
   WeatherCondition,
@@ -41,6 +42,7 @@ import { useWastewaterTreatment } from './useWastewaterTreatment';
 import { useWaterDistribution } from './useWaterDistribution';
 import { useWaterPurification } from './useWaterPurification';
 import { useWaterQualityControl } from './useWaterQualityControl';
+import { useWaterSourceLogging } from './useWaterSourceLogging';
 import { useWeatherSimulation } from './useWeatherSimulation';
 
 /**
@@ -136,6 +138,8 @@ export function useWaterSystem(): {
   currentWaterLevel: ComputedRef<number>;
   toggleManualMode: () => void;
   isManualMode: ComputedRef<boolean>;
+  waterSourceLogs: Ref<WaterSourceLogEntry[]>;
+  waterSourceLog$: Observable<WaterSourceLogEntry>;
 } {
   /**
    * Subject pour gérer la destruction du composable.
@@ -250,7 +254,7 @@ export function useWaterSystem(): {
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
    */
-  const { dam$, setInitialWaterLevel, damWaterVolume } = useDamManagement(
+  const { dam$, setInitialWaterLevel, damWaterVolume, updateDamWaterVolume } = useDamManagement(
     dataSources.waterSource$,
     dataSources.weatherSource$,
     glacierMelt$,
@@ -452,6 +456,8 @@ export function useWaterSystem(): {
       .subscribe(next);
   };
 
+  const { logWaterSource, logs: waterSourceLogs, log$: waterSourceLog$ } = useWaterSourceLogging();
+
   /**
    * Observables partagés pour les différents aspects du système d'eau.
    * L'utilisation de shareReplay(1) permet d'optimiser les performances en évitant
@@ -461,9 +467,23 @@ export function useWaterSystem(): {
    * Ces Observables partagés sont créés à partir des Observables originaux en utilisant l'opérateur shareReplay(1).
    * Cela permet d'optimiser les performances en évitant de recalculer les valeurs pour chaque souscription.
    */
-  const sharedDam$ = dam$.pipe(shareReplay(1));
+  const sharedDam$ = dam$.pipe(
+    tap((level) => {
+      if (waterSystemConfig.enableWaterSystemLogs) {
+        logWaterSource('Dam')(level);
+      }
+    }),
+    shareReplay(1),
+  );
   const sharedWeather$ = weatherSimulation$.pipe(shareReplay(1));
-  const sharedGlacierMelt$ = glacierMelt$.pipe(shareReplay(1));
+  const sharedGlacierMelt$ = glacierMelt$.pipe(
+    tap(({ waterFlow }) => {
+      if (waterSystemConfig.enableWaterSystemLogs) {
+        logWaterSource('Glacier')(waterFlow);
+      }
+    }),
+    shareReplay(1),
+  );
   const sharedPurificationPlant$ = purificationPlant$.pipe(shareReplay(1));
   const sharedPowerPlant$ = powerPlant$.pipe(shareReplay(1));
   const sharedIrrigation$ = irrigation$.pipe(shareReplay(1));
@@ -509,6 +529,7 @@ export function useWaterSystem(): {
     (level) => {
       if (!isManualMode.value) {
         state.value.waterLevel = level;
+        updateDamWaterVolume(level);
       }
     },
     'Souscription au niveau du barrage',
@@ -1127,5 +1148,7 @@ export function useWaterSystem(): {
     isManualMode: computed(() => isManualMode.value),
     toggleManualMode,
     toggleAutoMode,
+    waterSourceLogs,
+    waterSourceLog$,
   };
 }

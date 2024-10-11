@@ -1,5 +1,5 @@
 <template>
-  <div class="wastewater-treatment">
+  <div class="wastewater-treatment-component">
     <h3 v-once>
       <i class="pi pi-refresh mr-2"></i>
       Traitement des Eaux Usées

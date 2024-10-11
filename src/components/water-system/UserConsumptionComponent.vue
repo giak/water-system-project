@@ -1,5 +1,5 @@
 <template>
-  <div class="user-consumption">
+  <div class="user-consumption-component">
     <h3 v-once>
       <i class="pi pi-users mr-2"></i>
       Consommation des Utilisateurs

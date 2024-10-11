@@ -1,5 +1,5 @@
 <template>
-  <div class="water-quality">
+  <div class="water-quality-component">
     <h3 v-once>
       <i class="pi pi-check-circle mr-2"></i>
       Qualité de l'Eau

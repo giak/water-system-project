@@ -1,4 +1,4 @@
-.glacier {
+.glacier-component {
     @apply bg-blue-50 border border-sky-300 rounded-lg p-4 transition-colors duration-300;
   
     h3 {
@@ -7,6 +7,14 @@
   
     .glacier-info {
       @apply flex justify-between items-center mb-2;
+
+      &.critical {
+        @apply text-red-600;
+      }
+      
+      &.warning {
+        @apply text-orange-500;
+      }
     }
   
     .info-label {
@@ -14,6 +22,6 @@
     }
   
     .info-value {
-      @apply text-blue-600 font-bold;
+      @apply text-blue-600;
     }
 }

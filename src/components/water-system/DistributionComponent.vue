@@ -1,5 +1,5 @@
 <template>
-  <div class="distribution" :class="distributionClass">
+  <div class="distribution-component">
     <h3 v-once>
       <i class="pi pi-share-alt mr-2"></i>
       Distribution d'Eau

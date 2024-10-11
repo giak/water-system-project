@@ -1,5 +1,5 @@
 <template>
-  <div class="dam">
+  <div class="dam-component">
     <h3 v-once>
       <i class="pi pi-shield mr-2"></i>
       Barrage
@@ -107,41 +107,3 @@ const resetSystem = () => {
   emit('reset-system');
 };
 </script>
-
-<style scoped>
-.btn--auto {
-  background-color: #4CAF50;
-  color: white;
-}
-
-.btn--manual {
-  background-color: #f44336;
-  color: white;
-}
-.water-level-info.critical {
-  color: red;
-  font-weight: bold;
-}
-
-.water-level-info.warning {
-  color: orange;
-  font-weight: bold;
-}
-
-.glacier-inflow-info {
-  z-index: 100;
-  margin: 30px 0 0 30px;
-  width: 100%;
-  font-style: italic;
-}
-
-.water-volume-info {
-  position: absolute;
-  z-index: 100;
-  top: 70px; 
-  left: 10px;
-  background-color: rgba(255, 255, 255, 0.7);
-  padding: 5px;
-  border-radius: 5px;
-}
-</style>

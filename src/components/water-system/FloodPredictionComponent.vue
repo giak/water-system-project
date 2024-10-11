@@ -1,5 +1,5 @@
 <template>
-  <div class="flood-prediction">
+  <div class="flood-prediction-component">
     <h3 v-once>
       <i class="pi pi-exclamation-triangle mr-2"></i>
       Prévision des Inondations

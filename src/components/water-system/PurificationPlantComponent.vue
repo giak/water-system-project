@@ -1,5 +1,5 @@
 <template>
-  <div class="purification-plant">
+  <div class="purification-plant-component">
     <h3 v-once>
       <i class="pi pi-filter mr-2"></i>
       Station de Purification

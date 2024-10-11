@@ -1,5 +1,5 @@
 <template>
-  <div class="power-plant">
+  <div class="power-plant-component">
     <h3 v-once>
       <i class="pi pi-bolt mr-2"></i>
       Centrale Hydroélectrique

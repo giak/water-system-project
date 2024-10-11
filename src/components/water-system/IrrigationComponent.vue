@@ -1,5 +1,5 @@
 <template>
-  <div class="irrigation">
+  <div class="irrigation-component">
     <h3 v-once>
       <i class="pi pi-seedling mr-2"></i>
       Système d'Irrigation

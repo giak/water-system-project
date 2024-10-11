@@ -1,5 +1,5 @@
 <template>
-  <div class="glacier">
+  <div class="glacier-component">
     <h3 v-once>
       <i class="pi pi-cloud mr-2"></i>
       Glacier
@@ -91,15 +91,3 @@ watch(
   },
 );
 </script>
-
-<style scoped>
-.glacier-info.critical {
-  color: red;
-  font-weight: bold;
-}
-
-.glacier-info.warning {
-  color: orange;
-  font-weight: bold;
-}
-</style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="weather-station">
+  <div class="weather-station-component">
     <h3 v-once>
       <i class="pi pi-sun mr-2"></i>
       Station Météo

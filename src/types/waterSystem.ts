@@ -74,12 +74,15 @@ export interface WaterSystemComposable {
   updateDamCapacity: (capacity: number) => void;
   isManualMode: Ref<boolean>;
   toggleManualMode: () => void;
-  toggleAutoMode: () => void; // Add this line
+  toggleAutoMode: () => void;
 }
 
 export interface WaterSourceLogEntry {
   timestamp: number;
   source: string;
-  amount: number; // Peut être positif (entrée) ou négatif (sortie)
+  amount: number;
   weather?: WeatherCondition;
+  flowRate?: number;
+  quality?: number;
+  temperature?: number;
 }

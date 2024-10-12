@@ -15,7 +15,31 @@
 
     .log-grid {
         @apply grid gap-2;
-        grid-template-columns: minmax(180px, auto) minmax(80px, auto) minmax(100px, auto);
+    }
+
+    .log-entry {
+        @apply border-b border-gray-700 pb-2 mb-2;
+        display: grid;
+        grid-template-columns: 
+            minmax(140px, 1fr)  // timestamp
+            minmax(80px, 1fr)   // source
+            minmax(100px, 1fr)  // amount
+            minmax(80px, 1fr)   // weather
+            minmax(80px, 1fr)   // flow rate
+            minmax(80px, 1fr)   // quality
+            minmax(80px, 1fr);  // temperature
+        gap: 8px;
+        align-items: center;
+    }
+
+    .log-timestamp,
+    .log-source,
+    .log-amount,
+    .log-weather,
+    .log-flow-rate,
+    .log-quality,
+    .log-temperature {
+        @apply overflow-hidden text-ellipsis whitespace-nowrap;
     }
 
     .log-timestamp {
@@ -27,7 +51,14 @@
     }
 
     .log-amount {
-        @apply text-yellow-300 text-right;
+        @apply text-yellow-300;
+    }
+
+    .log-weather,
+    .log-flow-rate,
+    .log-quality,
+    .log-temperature {
+        @apply text-gray-300;
     }
 
     .inflow {

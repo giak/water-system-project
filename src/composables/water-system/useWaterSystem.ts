@@ -456,7 +456,12 @@ export function useWaterSystem(): {
       .subscribe(next);
   };
 
-  const { logWaterSource, logs: waterSourceLogs, log$: waterSourceLog$ } = useWaterSourceLogging();
+  const { logs: waterSourceLogs, log$: waterSourceLog$, logWaterSource } = useWaterSourceLogging();
+
+  // Utiliser logWaterSource pour chaque source d'eau
+  const logDam = logWaterSource('Dam');
+  const logGlacier = logWaterSource('Glacier');
+  // ... (autres sources)
 
   /**
    * Observables partagés pour les différents aspects du système d'eau.
@@ -470,7 +475,7 @@ export function useWaterSystem(): {
   const sharedDam$ = dam$.pipe(
     tap((level) => {
       if (waterSystemConfig.enableWaterSystemLogs) {
-        logWaterSource('Dam')(level);
+        logDam(level, state.value.weatherCondition, state.value.waterFlow, state.value.waterQuality);
       }
     }),
     shareReplay(1),
@@ -479,7 +484,7 @@ export function useWaterSystem(): {
   const sharedGlacierMelt$ = glacierMelt$.pipe(
     tap(({ waterFlow }) => {
       if (waterSystemConfig.enableWaterSystemLogs) {
-        logWaterSource('Glacier')(waterFlow);
+        logGlacier(state.value.glacierVolume, state.value.weatherCondition, waterFlow);
       }
     }),
     shareReplay(1),

@@ -1,21 +1,31 @@
+import { computed, type ComputedRef } from 'vue';
+import { throttle } from 'lodash-es';
 import { waterSystemConfig } from '@/config/waterSystemConfig';
-import { tap } from 'rxjs/operators';
 
-export function measureObservablePerformance<T>(name: string) {
-  return tap<T>({
-    subscribe: () => {
-      if (waterSystemConfig.enablePerformanceLogs) console.time(`Subscribe ${name}`);
-    },
-    next: (value) => {
-      if (waterSystemConfig.enablePerformanceLogs) {
-        const endTime = performance.now();
-        console.log(
-          `Observable ${name} - Temps: ${endTime.toFixed(2)}ms - Valeur: ${JSON.stringify(value)}`,
-        );
-      }
-    },
-    complete: () => {
-      if (waterSystemConfig.enablePerformanceLogs) console.timeEnd(`Subscribe ${name}`);
-    },
+/**
+ * Crée une version mémoïsée et throttled d'une fonction de calcul.
+ *
+ * @param {Function} calculationFn - La fonction de calcul à optimiser
+ * @param {string} name - Le nom du calcul (utilisé pour les logs de performance)
+ * @returns {ComputedRef<any>} Une référence calculée optimisée
+ */
+export function createOptimizedComputed<T>(
+  calculationFn: () => T,
+  name: string
+): ComputedRef<T> {
+  const memoizedFn = computed(calculationFn);
+
+  const throttledFn = throttle(() => {
+    return memoizedFn.value;
+  }, waterSystemConfig.THROTTLE_DELAY);
+
+  return computed(() => {
+    if (waterSystemConfig.enablePerformanceLogs) {
+      console.time(`${name} calculation`);
+      const result = throttledFn();
+      console.timeEnd(`${name} calculation`);
+      return result;
+    }
+    return throttledFn();
   });
 }

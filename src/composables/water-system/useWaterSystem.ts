@@ -6,22 +6,11 @@
  * @module WaterSystem
  */
 
-import { waterSystemConfig } from '@/config/waterSystemConfig';
-import type {
-  Alert,
-  DataSources,
-  SimulationControls,
-  WaterSourceLogEntry, // Ajout de cette ligne
-  WaterSystemObservables,
-  WaterSystemState,
-  WeatherCondition,
-} from '@/types/waterSystem';
-import { throttle } from 'lodash-es';
-import { Observable, Subject, merge, of } from 'rxjs';
+// Imports from external libraries
+import { Observable, Subject } from 'rxjs';
 import {
   catchError,
   distinctUntilChanged,
-  filter,
   map,
   shareReplay,
   take,
@@ -29,99 +18,64 @@ import {
   tap,
 } from 'rxjs/operators';
 import type { ComputedRef, Ref } from 'vue';
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useAlertSystem } from './useAlertSystem';
-import { useDamManagement } from './useDamManagement';
-import { useFloodPrediction } from './useFloodPrediction';
-import { useGlacierMelt } from './useGlacierMelt';
-import { useIrrigation } from './useIrrigation';
-import { usePowerPlant } from './usePowerPlant';
-import { useSimulation } from './useSimulation';
-import { useUserWaterManagement } from './useUserWaterManagement';
-import { useWastewaterTreatment } from './useWastewaterTreatment';
-import { useWaterDistribution } from './useWaterDistribution';
-import { useWaterPurification } from './useWaterPurification';
-import { useWaterQualityControl } from './useWaterQualityControl';
-import { useWaterSourceLogging } from './useWaterSourceLogging';
-import { useWeatherSimulation } from './useWeatherSimulation';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 
-/**
- * Type représentant une erreur potentielle dans le système d'eau.
- * Peut être une instance d'Error ou un type inconnu pour couvrir tous les cas possibles.
- */
-type WaterSystemError = Error | unknown;
+// Imports from local files
+import { waterSystemConfig } from '@/config/waterSystemConfig';
+import type {
+  Alert,
+  DataSources,
+  SimulationControls,
+  WaterSourceLogEntry,
+  WaterSystemObservables,
+  WaterSystemState,
+  WeatherCondition,
+} from '@/types/waterSystem';
+import { handleError } from '@/utils/errorUtils';
 
-/**
- * Gère les erreurs survenant dans le système d'eau.
- *
- * @param {WaterSystemError} error - L'erreur à gérer
- * @param {string} context - Le contexte dans lequel l'erreur s'est produite
- * @returns {Observable<never>} Un Observable vide pour continuer le flux
- *
- * @description
- * Cette fonction est cruciale pour la robustesse du système. Elle centralise la gestion des erreurs,
- * permettant une approche cohérente et extensible pour traiter les problèmes.
- *
- * Fonctionnement :
- * 1. Log l'erreur dans la console avec le contexte pour faciliter le débogage.
- * 2. Pourrait être étendue pour envoyer l'erreur à un service de monitoring externe.
- * 3. Retourne un Observable vide pour ne pas interrompre le flux de données.
- *
- * Pourquoi c'est ainsi fait :
- * - Centralisation : Facilite la maintenance et l'évolution de la gestion des erreurs.
- * - Contextualisation : Le paramètre 'context' aide à identifier rapidement la source de l'erreur.
- * - Continuité : Le retour d'un Observable vide permet au système de continuer à fonctionner malgré l'erreur.
- */
-function handleError(error: WaterSystemError, context: string): Observable<never> {
-  console.error(`Erreur dans ${context}:`, error);
-  // TODO : Vous pouvez ajouter ici une logique pour envoyer l'erreur à un service de monitoring
-  return of(); // Retourne un Observable vide pour continuer le flux
-}
+// Imports of local composables
+import {
+  useAlertSystem,
+  useDamManagement,
+  useFloodPrediction,
+  useGlacierMelt,
+  useIrrigation,
+  usePowerPlant,
+  useSimulation,
+  useUserWaterManagement,
+  useWastewaterTreatment,
+  useWaterDistribution,
+  useWaterPurification,
+  useWaterQualityControl,
+  useWaterSourceLogging,
+  useWeatherSimulation,
+} from './';
 
 /**
  * Composable principal pour la gestion du système d'eau.
- *
- * @returns {Object} Un objet contenant l'état du système, les observables, les contrôles de simulation et diverses fonctions utilitaires
- *
+ * 
+ * @returns Un objet contenant l'état du système, les observables, les contrôles de simulation et diverses fonctions utilitaires.
+ * 
  * @description
  * Ce composable est le cœur du système de gestion de l'eau. Il intègre et coordonne tous les sous-systèmes
  * pour fournir une interface unifiée et réactive du système d'eau dans son ensemble.
- *
- * Fonctionnement détaillé :
- * 1. Initialisation :
- *    - Crée un Subject 'destroy$' pour gérer le cycle de vie du composable.
- *    - Initialise le système d'alerte avec useAlertSystem().
- *    - Crée un état réactif (state) contenant toutes les métriques du système.
- *    - Initialise les sources de données (dataSources) pour chaque aspect du système.
- *
- * 2. Intégration des sous-systèmes :
- *    - Utilise des composables spécialisés (useDamManagement, useWaterPurification, etc.) pour gérer chaque aspect du système.
- *    - Crée des Observables partagés (sharedDam$, sharedWeather$, etc.) pour optimiser les performances.
- *
- * 3. Gestion des modes de fonctionnement :
- *    - Implémente un mode automatique et un mode manuel.
- *    - Fournit des fonctions pour basculer entre ces modes et contrôler manuellement le niveau d'eau.
- *
- * 4. Optimisations :
- *    - Utilise 'optimizedSubscribe' pour standardiser et optimiser les souscriptions aux Observables.
- *    - Applique 'shareReplay' sur les Observables fréquemment utilisés pour éviter les calculs redondants.
- *
- * 5. Calculs dérivés :
- *    - Fournit des computed properties pour des métriques complexes comme l'efficacité du système.
- *    - Utilise la mémoïsation et le throttling pour optimiser les calculs coûteux.
- *
- * 6. Gestion des alertes :
- *    - Intègre un système d'alerte réactif basé sur divers seuils et conditions.
- *
- * 7. Réinitialisation du système :
- *    - Fournit une fonction 'resetSystem' pour remettre l'ensemble du système à son état initial.
- *
- * Pourquoi c'est ainsi fait :
- * - Modularité : La séparation en sous-systèmes facilite la maintenance et l'extension du système.
- * - Réactivité : L'utilisation de RxJS et Vue 3 Composition API permet une gestion efficace des flux de données complexes.
- * - Performance : Les optimisations (shareReplay, mémoïsation) améliorent l'efficacité du système.
- * - Robustesse : La gestion centralisée des erreurs et le mode manuel assurent la résilience du système.
- * - Flexibilité : L'architecture permet facilement d'ajouter de nouvelles fonctionnalités ou de modifier le comportement existant.
+ * 
+ * Fonctionnalités principales :
+ * - Gestion de l'état global du système d'eau
+ * - Coordination des différents sous-systèmes (barrage, purification, distribution, etc.)
+ * - Gestion des modes automatique et manuel
+ * - Système d'alertes en temps réel
+ * - Calculs d'efficacité et de performance du système
+ * 
+ * @example
+ * const {
+ *   state,
+ *   observables,
+ *   simulationControls,
+ *   resetSystem,
+ *   setWaterLevel,
+ *   // ... autres propriétés et méthodes
+ * } = useWaterSystem();
  */
 export function useWaterSystem(): {
   state: ComputedRef<WaterSystemState>;
@@ -143,21 +97,11 @@ export function useWaterSystem(): {
 } {
   /**
    * Subject pour gérer la destruction du composable.
-   * Utilis pour nettoyer les souscriptions lors de la destruction du composable.
+   * Utilisé pour nettoyer les souscriptions lors de la destruction du composable.
    *
    * @type {Subject<void>}
    */
   const destroy$ = new Subject<void>();
-
-  /**
-   * Système d'alerte pour gérer les notifications du système d'eau.
-   * Fournit des méthodes pour ajouter des alertes et accéder à la liste des alertes actuelles.
-   *
-   * @type {Object}
-   * @property {Ref<Alert[]>} alerts - Liste réactive des alertes actuelles
-   * @property {Function} addAlert - Fonction pour ajouter une nouvelle alerte
-   */
-  const { alerts, addAlert } = useAlertSystem();
 
   /**
    * État réactif principal du système d'eau.
@@ -185,8 +129,8 @@ export function useWaterSystem(): {
    * - glacierVolume : Le volume actuel du glacier.
    * - meltRate : Le taux de fonte du glacier.
    */
-  const state = ref<WaterSystemState>({
-    waterLevel: waterSystemConfig.INITIAL_DAM_WATER_LEVEL, // Utiliser la nouvelle constante
+  const state = reactive<WaterSystemState>({
+    waterLevel: waterSystemConfig.INITIAL_DAM_WATER_LEVEL,
     isAutoMode: true,
     purifiedWater: waterSystemConfig.INITIAL_PURIFIED_WATER,
     powerGenerated: waterSystemConfig.INITIAL_POWER_GENERATED,
@@ -386,7 +330,7 @@ export function useWaterSystem(): {
    * @type {ComputedRef<number>}
    */
   const currentWaterLevel = computed(() => {
-    return isManualMode.value ? manualWaterLevel.value : state.value.waterLevel;
+    return isManualMode.value ? manualWaterLevel.value : state.waterLevel;
   });
 
   /**
@@ -398,7 +342,7 @@ export function useWaterSystem(): {
   const setWaterLevel = (level: number): void => {
     if (isManualMode.value) {
       manualWaterLevel.value = level;
-      state.value.waterLevel = level;
+      state.waterLevel = level;
     }
   };
 
@@ -410,7 +354,7 @@ export function useWaterSystem(): {
     isManualMode.value = !isManualMode.value;
     if (isManualMode.value) {
       stopSimulation();
-      manualWaterLevel.value = state.value.waterLevel;
+      manualWaterLevel.value = state.waterLevel;
     } else {
       startSimulation();
     }
@@ -439,7 +383,7 @@ export function useWaterSystem(): {
    *
    * Pourquoi c'est ainsi fait :
    * - Réduit la duplication de code en centralisant les optimisations communes
-   * - Améliore les performances en évitant les mises à jour inutiles
+   * - Améliore les performances en évitant les mises  jour inutiles
    * - Assure une gestion cohérente des erreurs et du nettoyage des ressources
    */
   const optimizedSubscribe = <T>(
@@ -467,210 +411,126 @@ export function useWaterSystem(): {
    * Observables partagés pour les différents aspects du système d'eau.
    * L'utilisation de shareReplay(1) permet d'optimiser les performances en évitant
    * les calculs redondants lorsque plusieurs composants s'abonnent au même Observable.
-   *
-   * @description
-   * Ces Observables partagés sont créés à partir des Observables originaux en utilisant l'opérateur shareReplay(1).
-   * Cela permet d'optimiser les performances en évitant de recalculer les valeurs pour chaque souscription.
    */
-  const sharedDam$ = dam$.pipe(
-    tap((level) => {
-      if (waterSystemConfig.enableWaterSystemLogs) {
-        logDam(level, state.value.weatherCondition, state.value.waterFlow, state.value.waterQuality);
-      }
-    }),
-    shareReplay(1),
-  );
-  const sharedWeather$ = weatherSimulation$.pipe(shareReplay(1));
-  const sharedGlacierMelt$ = glacierMelt$.pipe(
-    tap(({ waterFlow }) => {
-      if (waterSystemConfig.enableWaterSystemLogs) {
-        logGlacier(state.value.glacierVolume, state.value.weatherCondition, waterFlow);
-      }
-    }),
-    shareReplay(1),
-  );
-  const sharedPurificationPlant$ = purificationPlant$.pipe(shareReplay(1));
-  const sharedPowerPlant$ = powerPlant$.pipe(shareReplay(1));
-  const sharedIrrigation$ = irrigation$.pipe(shareReplay(1));
-  const sharedWastewaterTreatment$ = wastewaterTreatment$.pipe(shareReplay(1));
-  const sharedWaterQualityControl$ = waterQualityControl$.pipe(shareReplay(1));
-  const sharedFloodPrediction$ = floodPrediction$.pipe(shareReplay(1));
-  const sharedUserWaterManagement$ = userWaterManagement$.pipe(shareReplay(1));
-  const sharedWaterDistribution$ = waterDistribution$.pipe(shareReplay(1));
+  const sharedObservables = {
+    dam$: dam$.pipe(
+      tap((level) => {
+        if (waterSystemConfig.enableWaterSystemLogs) {
+          logDam(level, state.weatherCondition, state.waterFlow, state.waterQuality);
+        }
+      }),
+      shareReplay(1),
+    ),
+    weather$: weatherSimulation$.pipe(shareReplay(1)),
+    glacierMelt$: glacierMelt$.pipe(
+      tap(({ waterFlow }) => {
+        if (waterSystemConfig.enableWaterSystemLogs) {
+          logGlacier(state.glacierVolume, state.weatherCondition, waterFlow);
+        }
+      }),
+      shareReplay(1),
+    ),
+    purificationPlant$: purificationPlant$.pipe(shareReplay(1)),
+    powerPlant$: powerPlant$.pipe(shareReplay(1)),
+    irrigation$: irrigation$.pipe(shareReplay(1)),
+    wastewaterTreatment$: wastewaterTreatment$.pipe(shareReplay(1)),
+    waterQualityControl$: waterQualityControl$.pipe(shareReplay(1)),
+    floodPrediction$: floodPrediction$.pipe(shareReplay(1)),
+    userWaterManagement$: userWaterManagement$.pipe(shareReplay(1)),
+    waterDistribution$: waterDistribution$.pipe(shareReplay(1)),
+    damWaterVolume$: new Observable<number>((subscriber) => {
+      const unwatch = watch(
+        damWaterVolume,
+        (newValue) => {
+          subscriber.next(newValue);
+        },
+        { immediate: true },
+      );
+      return () => {
+        unwatch();
+      };
+    }).pipe(shareReplay(1)),
+  };
 
-  // Convertir le Ref<number> en Observable<number>
-  const damWaterVolume$ = new Observable<number>((subscriber) => {
-    const unwatch = watch(
-      damWaterVolume,
-      (newValue) => {
-        subscriber.next(newValue);
-      },
-      { immediate: true },
-    );
+  const { alerts, addAlert, alertSystem$, alertsObservable$ } = useAlertSystem(sharedObservables);
 
-    return () => {
-      unwatch();
-    };
+  /**
+   * Gère les souscriptions aux observables partagés.
+   * 
+   * @param observables - Un objet contenant les observables à souscrire
+   * @param updateState - Une fonction pour mettre à jour l'état
+   * 
+   * @description
+   * Cette fonction centralise la gestion des souscriptions aux observables partagés.
+   * Elle utilise la fonction `optimizedSubscribe` pour chaque observable, ce qui permet
+   * d'appliquer des optimisations communes (comme distinctUntilChanged et gestion des erreurs)
+   * à toutes les souscriptions.
+   */
+  function manageSubscriptions(
+    observables: Record<string, Observable<unknown>>,
+    updateState: (key: string, value: unknown) => void,
+  ) {
+    for (const [key, observable] of Object.entries(observables)) {
+      optimizedSubscribe(observable, (value) => updateState(key, value), `Souscription à ${key}`);
+    }
+  }
+
+  // Utilisation de la nouvelle fonction manageSubscriptions
+  manageSubscriptions(sharedObservables, (key, value) => {
+    switch (key) {
+      case 'dam$':
+        if (!isManualMode.value) {
+          state.waterLevel = value as number;
+          updateDamWaterVolume(value as number);
+        }
+        break;
+      case 'weather$':
+        state.weatherCondition = value as WeatherCondition;
+        break;
+      case 'glacierMelt$': {
+        const { volume, meltRate, waterFlow } = value as {
+          volume: number;
+          meltRate: number;
+          waterFlow: number;
+        };
+        state.glacierVolume = volume;
+        state.meltRate = meltRate;
+        state.waterFlow = waterFlow;
+        break;
+      }
+      case 'purificationPlant$':
+        state.purifiedWater = value as number;
+        break;
+      case 'powerPlant$':
+        state.powerGenerated = value as number;
+        break;
+      case 'irrigation$':
+        state.irrigationWater = value as number;
+        break;
+      case 'wastewaterTreatment$':
+        state.treatedWastewater = value as number;
+        break;
+      case 'waterQualityControl$':
+        state.waterQuality = value as number;
+        break;
+      case 'floodPrediction$':
+        state.floodRisk = value as number;
+        break;
+      case 'userWaterManagement$':
+        state.userConsumption = value as number;
+        break;
+      case 'waterDistribution$': {
+        const distributionValue = value as number;
+        state.waterDistributed = distributionValue;
+        if (distributionValue < waterSystemConfig.LOW_WATER_DISTRIBUTION) {
+          addAlert("Distribution d'eau faible", 'medium');
+        } else if (distributionValue > waterSystemConfig.HIGH_WATER_DISTRIBUTION) {
+          addAlert("Distribution d'eau élevée", 'low');
+        }
+        break;
+      }
+    }
   });
-
-  /**
-   * Souscription aux observables partagés.
-   * Met à jour l'état du système en fonction des valeurs émises par les observables partagés.
-   *
-   * @description
-   * Ces souscriptions utilisent la fonction optimizedSubscribe pour mettre à jour l'état du système
-   * de manière efficace et gérer les erreurs de façon centralisée.
-   */
-  /**
-   * Souscription au niveau du barrage.
-   * Met à jour l'état du système en fonction du niveau du barrage.
-   *
-   * @description
-   * Cette souscription met à jour le niveau d'eau dans l'état du système,
-   * mais seulement si le système n'est pas en mode manuel.
-   */
-  optimizedSubscribe(
-    sharedDam$,
-    (level) => {
-      if (!isManualMode.value) {
-        state.value.waterLevel = level;
-        updateDamWaterVolume(level);
-      }
-    },
-    'Souscription au niveau du barrage',
-  );
-
-  /**
-   * Souscription aux conditions météorologiques.
-   * Met à jour l'état du système en fonction des conditions météorologiques.
-   */
-  optimizedSubscribe(
-    sharedWeather$,
-    (weather) => {
-      state.value.weatherCondition = weather;
-    },
-    'Souscription aux conditions météorologiques',
-  );
-
-  /**
-   * Souscription à la fonte du glacier.
-   * Met à jour l'état du système en fonction du volume et du taux de fonte du glacier.
-   */
-  optimizedSubscribe(
-    sharedGlacierMelt$,
-    ({ volume, meltRate, waterFlow }) => {
-      state.value.glacierVolume = volume;
-      state.value.meltRate = meltRate;
-      state.value.waterFlow = waterFlow;
-    },
-    'Souscription à la fonte du glacier',
-  );
-
-  /**
-   * Souscription à la purification de l'eau.
-   * Met à jour l'état du système en fonction de la quantité d'eau purifiée.
-   */
-  optimizedSubscribe(
-    sharedPurificationPlant$,
-    (water) => {
-      state.value.purifiedWater = water;
-    },
-    "Souscription à la purification de l'eau",
-  );
-
-  /**
-   * Souscription à la production d'énergie.
-   * Met à jour l'état du système en fonction de la quantité d'énergie produite.
-   */
-  optimizedSubscribe(
-    sharedPowerPlant$,
-    (power) => {
-      state.value.powerGenerated = power;
-    },
-    "Souscription à la production d'énergie",
-  );
-
-  /**
-   * Souscription à l'irrigation.
-   * Met à jour l'état du système en fonction de la quantité d'eau utilisée pour l'irrigation.
-   */
-  optimizedSubscribe(
-    sharedIrrigation$,
-    (water) => {
-      state.value.irrigationWater = water;
-    },
-    "Souscription à l'irrigation",
-  );
-
-  /**
-   * Souscription au traitement des eaux usées.
-   * Met à jour l'état du système en fonction de la quantité d'eau usée traitée.
-   */
-  optimizedSubscribe(
-    sharedWastewaterTreatment$,
-    (water) => {
-      state.value.treatedWastewater = water;
-    },
-    'Souscription au traitement des eaux usées',
-  );
-
-  /**
-   * Souscription au contrôle de la qualité de l'eau.
-   * Met à jour l'état du système en fonction de la qualité de l'eau mesurée.
-   */
-  optimizedSubscribe(
-    sharedWaterQualityControl$,
-    (quality) => {
-      state.value.waterQuality = quality;
-    },
-    "Souscription au contrôle de la qualité de l'eau",
-  );
-
-  /**
-   * Souscription à la prédiction des inondations.
-   * Met à jour l'état du système en fonction du risque d'inondation calculé.
-   */
-  optimizedSubscribe(
-    sharedFloodPrediction$,
-    (risk) => {
-      state.value.floodRisk = risk;
-    },
-    'Souscription à la prédiction des inondations',
-  );
-
-  /**
-   * Souscription à la gestion de l'eau des utilisateurs.
-   * Met à jour l'état du système en fonction de la consommation d'eau des utilisateurs.
-   */
-  optimizedSubscribe(
-    sharedUserWaterManagement$,
-    (consumption) => {
-      state.value.userConsumption = consumption;
-    },
-    "Souscription à la gestion de l'eau des utilisateurs",
-  );
-
-  /**
-   * Souscription à la distribution d'eau.
-   * Met à jour l'état du système en fonction de la quantité d'eau distribuée et génère des alertes si nécessaire.
-   */
-  optimizedSubscribe(
-    sharedWaterDistribution$,
-    (distributedWater) => {
-      state.value.waterDistributed = distributedWater;
-
-      /**
-       * Génération d'alertes en fonction de la distribution d'eau.
-       * Ajoute des alertes en fonction du niveau de distribution d'eau.
-       */
-      if (distributedWater < waterSystemConfig.LOW_WATER_DISTRIBUTION) {
-        addAlert("Distribution d'eau faible", 'medium');
-      } else if (distributedWater > waterSystemConfig.HIGH_WATER_DISTRIBUTION) {
-        addAlert("Distribution d'eau élevée", 'low');
-      }
-    },
-    "Souscription à la distribution d'eau",
-  );
 
   /**
    * Gestion des alertes.
@@ -680,137 +540,6 @@ export function useWaterSystem(): {
    * Ce système d'alerte utilise l'opérateur merge de RxJS pour combiner plusieurs sources d'alertes.
    * Chaque source d'alerte est basée sur un Observable partagé et génère des alertes
    * en fonction de conditions spécifiques.
-   */
-  const alertSystem$ = merge(
-    sharedDam$.pipe(
-      /**
-       * Alertes générées en fonction du niveau du barrage.
-       * Ajoute des alertes en fonction du niveau du barrage.
-       */
-      map((level) => {
-        if (level >= waterSystemConfig.VERY_HIGH_WATER_LEVEL)
-          return {
-            message: 'Alerte : Niveau du barrage critique! (90%+)',
-            priority: 'high' as const,
-          };
-        if (level >= waterSystemConfig.HIGH_WATER_LEVEL)
-          return {
-            message: 'Avertissement : Niveau du barrage élevé (80%+)',
-            priority: 'medium' as const,
-          };
-        if (level <= waterSystemConfig.CRITICAL_WATER_LEVEL)
-          return {
-            message: 'Alerte : Niveau du barrage très bas! (20% ou moins)',
-            priority: 'high' as const,
-          };
-        if (level <= waterSystemConfig.LOW_WATER_LEVEL)
-          return {
-            message: 'Avertissement : Niveau du barrage bas (30% ou moins)',
-            priority: 'medium' as const,
-          };
-        return null;
-      }),
-      filter((alert): alert is Exclude<typeof alert, null> => alert !== null),
-    ),
-    /**
-     * Alertes générées en fonction de la qualité de l'eau.
-     * Ajoute des alertes en fonction de la qualité de l'eau.
-     */
-    sharedWaterQualityControl$.pipe(
-      filter((quality) => quality < waterSystemConfig.LOW_WATER_QUALITY),
-      map(() => ({
-        message: "Alerte : Qualité de l'eau en dessous des normes!",
-        priority: 'high' as const,
-      })),
-    ),
-    sharedFloodPrediction$.pipe(
-      filter((risk) => risk > waterSystemConfig.HIGH_FLOOD_RISK),
-      map(() => ({ message: "Alerte : Risque élevé d'inondation!", priority: 'high' as const })),
-    ),
-    /**
-     * Alertes générées en fonction de la distribution d'eau.
-     * Ajoute des alertes en fonction de la distribution d'eau.
-     */
-    sharedWaterDistribution$.pipe(
-      filter((water) => water < waterSystemConfig.LOW_WATER_DISTRIBUTION),
-      map(() => ({ message: "Alerte : Distribution d'eau faible", priority: 'medium' as const })),
-    ),
-    /**
-     * Alertes générées en fonction de la distribution d'eau.
-     * Ajoute des alertes en fonction de la distribution d'eau.
-     */
-    sharedWaterDistribution$.pipe(
-      filter((water) => water > waterSystemConfig.HIGH_WATER_DISTRIBUTION),
-      map(() => ({ message: "Information : Distribution d'eau élevée", priority: 'low' as const })),
-    ),
-    /**
-     * Alertes générées en fonction de la consommation d'eau pour l'irrigation.
-     * Ajoute des alertes en fonction de la consommation d'eau pour l'irrigation.
-     */
-    sharedIrrigation$.pipe(
-      filter((water) => water > waterSystemConfig.HIGH_IRRIGATION_WATER),
-      map(() => ({
-        message: "Alerte : Consommation d'eau pour l'irrigation élevée",
-        priority: 'medium' as const,
-      })),
-    ),
-    /**
-     * Alertes générées en fonction de la production d'énergie.
-     * Ajoute des alertes en fonction de la production d'énergie.
-     */
-    sharedPowerPlant$.pipe(
-      filter((power) => power < waterSystemConfig.LOW_POWER_GENERATION),
-      map(() => ({ message: "Alerte : Production d'énergie faible", priority: 'medium' as const })),
-    ),
-    /**
-     * Alertes générées en fonction de la production d'énergie.
-     * Ajoute des alertes en fonction de la production d'énergie.
-     */
-    sharedPowerPlant$.pipe(
-      filter((power) => power > waterSystemConfig.HIGH_POWER_GENERATION),
-      map(() => ({
-        message: "Information : Production d'énergie exceptionnellement élevée",
-        priority: 'low' as const,
-      })),
-    ),
-    /**
-     * Alertes générées en fonction de la consommation d'eau des utilisateurs.
-     * Ajoute des alertes en fonction de la consommation d'eau des utilisateurs.
-     */
-    sharedUserWaterManagement$.pipe(
-      filter((consumption) => consumption > waterSystemConfig.HIGH_USER_CONSUMPTION),
-      map(() => ({
-        message: "Alerte : Consommation d'eau des utilisateurs élevée",
-        priority: 'medium' as const,
-      })),
-    ),
-    // Nouvelle alerte pour un débit d'eau élevé du glacier
-    sharedGlacierMelt$.pipe(
-      filter(({ waterFlow }) => waterFlow > waterSystemConfig.HIGH_GLACIER_WATER_FLOW),
-      map(() => ({
-        message: "Alerte : Débit d'eau élevé provenant du glacier",
-        priority: 'medium' as const,
-      })),
-    ),
-
-    // Nouvelle alerte pour un débit d'eau critique du glacier
-    sharedGlacierMelt$.pipe(
-      filter(({ waterFlow }) => waterFlow > waterSystemConfig.CRITICAL_GLACIER_WATER_FLOW),
-      map(() => ({
-        message: "Alerte critique : Débit d'eau très élevé provenant du glacier",
-        priority: 'high' as const,
-      })),
-    ),
-  ).pipe(
-    /**
-     * Ajoute des alertes en fonction des messages et priorités générés.
-     */
-    tap(({ message, priority }) => addAlert(message, priority)),
-    shareReplay(1),
-  );
-
-  /**
-   * S'abonne à alertSystem$ et gère les erreurs de manière centralisée.
    */
   alertSystem$.pipe(takeUntil(destroy$)).subscribe();
 
@@ -839,24 +568,22 @@ export function useWaterSystem(): {
     destroy$.complete();
 
     // Réinitialiser tous les états réactifs à leurs valeurs initiales
-    state.value = {
-      waterLevel: waterSystemConfig.INITIAL_DAM_WATER_LEVEL, // Utiliser la nouvelle constante
-      purifiedWater: waterSystemConfig.INITIAL_PURIFIED_WATER,
-      powerGenerated: waterSystemConfig.INITIAL_POWER_GENERATED,
-      waterDistributed: waterSystemConfig.INITIAL_WATER_DISTRIBUTED,
-      weatherCondition: 'ensoleillé' as WeatherCondition,
-      alerts: [],
-      irrigationWater: waterSystemConfig.INITIAL_IRRIGATION_WATER,
-      treatedWastewater: waterSystemConfig.INITIAL_TREATED_WASTEWATER,
-      waterQuality: waterSystemConfig.INITIAL_WATER_QUALITY,
-      floodRisk: waterSystemConfig.INITIAL_FLOOD_RISK,
-      userConsumption: waterSystemConfig.INITIAL_USER_CONSUMPTION,
-      glacierVolume: waterSystemConfig.INITIAL_GLACIER_VOLUME,
-      meltRate: waterSystemConfig.INITIAL_MELT_RATE,
-      isAutoMode: true,
-      waterFlow: waterSystemConfig.INITIAL_WATER_FLOW,
-      damWaterVolume: waterSystemConfig.INITIAL_DAM_WATER_VOLUME,
-    };
+    state.waterLevel = waterSystemConfig.INITIAL_DAM_WATER_LEVEL;
+    state.isAutoMode = true;
+    state.purifiedWater = waterSystemConfig.INITIAL_PURIFIED_WATER;
+    state.powerGenerated = waterSystemConfig.INITIAL_POWER_GENERATED;
+    state.waterDistributed = waterSystemConfig.INITIAL_WATER_DISTRIBUTED;
+    state.weatherCondition = 'ensoleillé' as WeatherCondition;
+    state.alerts = [];
+    state.irrigationWater = waterSystemConfig.INITIAL_IRRIGATION_WATER;
+    state.treatedWastewater = waterSystemConfig.INITIAL_TREATED_WASTEWATER;
+    state.waterQuality = waterSystemConfig.INITIAL_WATER_QUALITY;
+    state.floodRisk = waterSystemConfig.INITIAL_FLOOD_RISK;
+    state.userConsumption = waterSystemConfig.INITIAL_USER_CONSUMPTION;
+    state.glacierVolume = waterSystemConfig.INITIAL_GLACIER_VOLUME;
+    state.meltRate = waterSystemConfig.INITIAL_MELT_RATE;
+    state.waterFlow = waterSystemConfig.INITIAL_WATER_FLOW;
+    state.damWaterVolume = waterSystemConfig.INITIAL_DAM_WATER_VOLUME;
 
     // Réinitialiser le niveau d'eau du barrage à 70%
     setInitialWaterLevel(waterSystemConfig.INITIAL_DAM_WATER_LEVEL);
@@ -878,60 +605,60 @@ export function useWaterSystem(): {
       waterSystemConfig.SEASONAL_FACTOR_AMPLITUDE *
         Math.sin(Date.now() / waterSystemConfig.SEASONAL_FACTOR_PERIOD);
     dataSources.waterSource$.next(baseWaterInput * seasonalFactor);
-    dataSources.glacierSource$.next(state.value.glacierVolume);
+    dataSources.glacierSource$.next(state.glacierVolume);
     weatherSimulation$.pipe(take(1)).subscribe((weather) => {
-      state.value.weatherCondition = weather;
+      state.weatherCondition = weather;
       dataSources.weatherSource$.next(weather);
     });
 
     // Recréer toutes les souscriptions
     const subscriptions = [
-      sharedDam$
+      sharedObservables.dam$
         .pipe(
           takeUntil(destroy$),
           catchError((error) => handleError(error, 'Souscription au niveau du barrage')),
         )
         .subscribe((level) => {
-          state.value.waterLevel = level;
+          state.waterLevel = level;
         }),
 
-      sharedPurificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
-        state.value.purifiedWater += water;
+      sharedObservables.purificationPlant$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.purifiedWater += water;
       }),
 
-      sharedPowerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
-        state.value.powerGenerated += power;
+      sharedObservables.powerPlant$.pipe(takeUntil(destroy$)).subscribe((power) => {
+        state.powerGenerated += power;
       }),
 
-      sharedIrrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
-        state.value.irrigationWater = water;
+      sharedObservables.irrigation$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.irrigationWater = water;
       }),
 
-      sharedWastewaterTreatment$.pipe(takeUntil(destroy$)).subscribe((water) => {
-        state.value.treatedWastewater = water;
+      sharedObservables.wastewaterTreatment$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.treatedWastewater = water;
       }),
 
-      sharedWaterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
-        state.value.waterQuality = quality;
+      sharedObservables.waterQualityControl$.pipe(takeUntil(destroy$)).subscribe((quality) => {
+        state.waterQuality = quality;
       }),
 
-      sharedFloodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
-        state.value.floodRisk = risk;
+      sharedObservables.floodPrediction$.pipe(takeUntil(destroy$)).subscribe((risk) => {
+        state.floodRisk = risk;
       }),
 
-      sharedUserWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
-        state.value.userConsumption = consumption;
+      sharedObservables.userWaterManagement$.pipe(takeUntil(destroy$)).subscribe((consumption) => {
+        state.userConsumption = consumption;
       }),
 
       alertSystem$.pipe(takeUntil(destroy$)).subscribe(),
 
-      sharedWeather$.pipe(takeUntil(destroy$)).subscribe((weather) => {
-        state.value.weatherCondition = weather;
+      sharedObservables.weather$.pipe(takeUntil(destroy$)).subscribe((weather) => {
+        state.weatherCondition = weather;
         dataSources.weatherSource$.next(weather);
       }),
 
-      sharedWaterDistribution$.pipe(takeUntil(destroy$)).subscribe((water) => {
-        state.value.waterDistributed = water;
+      sharedObservables.waterDistribution$.pipe(takeUntil(destroy$)).subscribe((water) => {
+        state.waterDistributed = water;
       }),
 
       /**
@@ -943,12 +670,12 @@ export function useWaterSystem(): {
        * Cette fonction met à jour l'état du système avec les valeurs du débit d'eau du glacier.
        * Elle permet de suivre l'évolution du débit d'eau du glacier et de gérer les alertes en conséquence.
        */
-      sharedGlacierMelt$
+      sharedObservables.glacierMelt$
         .pipe(takeUntil(destroy$))
         .subscribe(({ volume, meltRate: rate, waterFlow: flow }) => {
-          state.value.glacierVolume = volume;
-          state.value.meltRate = rate;
-          state.value.waterFlow = flow;
+          state.glacierVolume = volume;
+          state.meltRate = rate;
+          state.waterFlow = flow;
         }),
     ];
 
@@ -973,86 +700,76 @@ export function useWaterSystem(): {
   });
 
   /**
-   * Calcul du total d'eau traitée.
-   *
-   * @description
-   * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
-   * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   *
+   * Cache pour les calculs coûteux.
+   * Utilise une Map pour stocker les résultats des calculs avec une durée de vie limitée.
    */
-  const memoizedTotalWaterProcessed = computed(() => {
-    return state.value.purifiedWater + state.value.waterDistributed;
-  });
+  const calculationCache = new Map<string, { value: unknown; timestamp: number }>();
 
   /**
-   * Optimisation des calculs coûteux avec throttling.
-   *
+   * Fonction pour obtenir une valeur du cache ou la calculer si elle n'existe pas.
+   * 
+   * @param key - La clé du calcul
+   * @param calculationFn - La fonction de calcul
+   * @param maxAge - La durée de vie maximale du résultat en millisecondes
+   * @returns Le résultat du calcul, soit depuis le cache, soit nouvellement calculé
+   * 
    * @description
-   * Cette fonction utilise l'opérateur throttle pour limiter le nombre d'appels à la fonction memoizedTotalWaterProcessed.
-   * Elle retarde l'exécution de cette fonction de manière à ce que le nombre d'appels ne dépasse pas une valeur spécifiée.
-   * Cela permet de réduire la consommation de ressources et d'améliorer les performances du système.
+   * Cette fonction implémente un mécanisme de cache simple pour les calculs coûteux.
+   * Elle vérifie d'abord si un résultat valide existe dans le cache. Si c'est le cas,
+   * elle retourne ce résultat. Sinon, elle exécute la fonction de calcul, stocke le
+   * résultat dans le cache, et retourne le résultat.
    */
-  const throttledTotalWaterProcessed = throttle(() => {
-    return memoizedTotalWaterProcessed.value;
-  }, waterSystemConfig.THROTTLE_DELAY);
-
-  /**
-   * Calcul du total d'eau traitée.
-   *
-   * @description
-   * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
-   * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   */
-  const totalWaterProcessed = computed(() => {
-    if (waterSystemConfig.enablePerformanceLogs) {
-      console.time('totalWaterProcessed');
-      const result = throttledTotalWaterProcessed();
-      console.timeEnd('totalWaterProcessed');
-      return result;
+  function getCachedOrCalculate<T>(key: string, calculationFn: () => T, maxAge: number): T {
+    const now = Date.now();
+    const cached = calculationCache.get(key);
+    if (cached && now - cached.timestamp < maxAge) {
+      return cached.value as T;
     }
-    return throttledTotalWaterProcessed();
-  });
+    const value = calculationFn();
+    calculationCache.set(key, { value, timestamp: now });
+    return value;
+  }
 
-  /**
-   * Calcul de l'efficacité du système.
-   *
-   * @description
-   * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
-   * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   */
-  const memoizedSystemEfficiency = computed(() => {
-    const processedWater = memoizedTotalWaterProcessed.value;
-    if (processedWater === 0) return 0;
-    return (state.value.purifiedWater / processedWater) * 100;
-  });
+  // Utilisation du cache pour totalWaterProcessed
+  const totalWaterProcessed = computed(() =>
+    getCachedOrCalculate(
+      'totalWaterProcessed',
+      () => state.purifiedWater + state.waterDistributed,
+      1000, // Cache valide pendant 1 seconde
+    ),
+  );
 
-  /**
-   * Optimisation des calculs coûteux avec throttling.
-   *
-   * @description
-   * Cette fonction utilise l'opérateur throttle pour limiter le nombre d'appels à la fonction memoizedSystemEfficiency.
-   * Elle retarde l'exécution de cette fonction de manière à ce que le nombre d'appels ne dépasse pas une valeur spécifiée.
-   * Cela permet de réduire la consommation de ressources et d'améliorer les performances du système.
-   */
-  const throttledSystemEfficiency = throttle(() => {
-    return memoizedSystemEfficiency.value;
-  }, waterSystemConfig.THROTTLE_DELAY);
+  // Utilisation du cache pour systemEfficiency
+  const systemEfficiency = computed(() =>
+    getCachedOrCalculate(
+      'systemEfficiency',
+      () => {
+        const processedWater = totalWaterProcessed.value;
+        if (processedWater === 0) return 0;
+        return (state.purifiedWater / processedWater) * 100;
+      },
+      1000, // Cache valide pendant 1 seconde
+    ),
+  );
 
-  /**
-   * Calcul de l'efficacité du système.
-   *
-   * @description
-   * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
-   * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   */
-  const systemEfficiency = computed(() => {
-    if (waterSystemConfig.enablePerformanceLogs) {
-      console.time('systemEfficiency');
-      const result = throttledSystemEfficiency();
-      console.timeEnd('systemEfficiency');
-      return result;
+  // Nettoyage du cache périodiquement
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [key, { timestamp }] of calculationCache.entries()) {
+      if (now - timestamp > 5000) {
+        // Supprimer les entrées de plus de 5 secondes
+        calculationCache.delete(key);
+      }
     }
-    return throttledSystemEfficiency();
+  }, 10000); // Nettoyer toutes les 10 secondes
+
+  // Nettoyage à la destruction du composant
+  onUnmounted(() => {
+    clearInterval(cleanupInterval);
+    destroy$.next();
+    destroy$.complete();
+    stopSimulation();
+    calculationCache.clear();
   });
 
   /**
@@ -1064,47 +781,25 @@ export function useWaterSystem(): {
    */
   const overallSystemStatus = computed(() => {
     if (
-      state.value.waterLevel < waterSystemConfig.CRITICAL_WATER_LEVEL ||
-      state.value.waterQuality < waterSystemConfig.CRITICAL_WATER_QUALITY
+      state.waterLevel < waterSystemConfig.CRITICAL_WATER_LEVEL ||
+      state.waterQuality < waterSystemConfig.CRITICAL_WATER_QUALITY
     ) {
       return 'Critique';
     }
     if (
-      state.value.waterLevel < waterSystemConfig.LOW_WATER_LEVEL ||
-      state.value.waterQuality < waterSystemConfig.MEDIUM_WATER_QUALITY
+      state.waterLevel < waterSystemConfig.LOW_WATER_LEVEL ||
+      state.waterQuality < waterSystemConfig.MEDIUM_WATER_QUALITY
     ) {
       return 'Préoccupant';
     }
     return 'Normal';
   });
 
-  /**
-   * Convertir le ComputedRef<Alert[]> en Observable<Alert[]>
-   *
-   * @description
-   * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
-   * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
-   */
-  const alertsObservable$ = new Observable<Alert[]>((subscriber) => {
-    const unwatch = watch(
-      alerts,
-      (newAlerts) => {
-        subscriber.next(newAlerts);
-      },
-      { immediate: true, deep: true },
-    );
-
-    return () => {
-      unwatch();
-    };
-  });
-
-  // Mettre à jour le volume d'eau du barrage chaque fois que le niveau d'eau change
+  // Mettez à jour le volume d'eau du barrage chaque fois que le niveau d'eau change
   watch(
-    () => state.value.waterLevel,
+    () => state.waterLevel,
     (newWaterLevel) => {
-      state.value.damWaterVolume =
-        (newWaterLevel / 100) * waterSystemConfig.INITIAL_DAM_WATER_VOLUME;
+      state.damWaterVolume = (newWaterLevel / 100) * waterSystemConfig.INITIAL_DAM_WATER_VOLUME;
     },
   );
 
@@ -1117,24 +812,24 @@ export function useWaterSystem(): {
    *
    */
   return {
-    state: computed(() => state.value),
+    state: computed(() => state),
     observables: {
-      waterLevel: sharedDam$,
-      purifiedWater: sharedPurificationPlant$,
-      powerGenerated: sharedPowerPlant$,
-      waterDistributed: sharedWaterDistribution$,
-      weatherCondition: sharedWeather$,
+      waterLevel: sharedObservables.dam$,
+      purifiedWater: sharedObservables.purificationPlant$,
+      powerGenerated: sharedObservables.powerPlant$,
+      waterDistributed: sharedObservables.waterDistribution$,
+      weatherCondition: sharedObservables.weather$,
       alerts: alertsObservable$,
-      irrigationWater: sharedIrrigation$,
-      treatedWastewater: sharedWastewaterTreatment$,
-      waterQuality: sharedWaterQualityControl$,
-      floodRisk: sharedFloodPrediction$,
-      userConsumption: sharedUserWaterManagement$,
-      glacierVolume: sharedGlacierMelt$.pipe(map(({ volume }) => volume)),
-      meltRate: sharedGlacierMelt$.pipe(map(({ meltRate }) => meltRate)),
-      waterFlow: sharedGlacierMelt$.pipe(map(({ waterFlow }) => waterFlow)),
+      irrigationWater: sharedObservables.irrigation$,
+      treatedWastewater: sharedObservables.wastewaterTreatment$,
+      waterQuality: sharedObservables.waterQualityControl$,
+      floodRisk: sharedObservables.floodPrediction$,
+      userConsumption: sharedObservables.userWaterManagement$,
+      glacierVolume: sharedObservables.glacierMelt$.pipe(map(({ volume }) => volume)),
+      meltRate: sharedObservables.glacierMelt$.pipe(map(({ meltRate }) => meltRate)),
+      waterFlow: sharedObservables.glacierMelt$.pipe(map(({ waterFlow }) => waterFlow)),
       isAutoMode: isAutoMode as unknown as Observable<boolean>,
-      damWaterVolume: sharedDam$,
+      damWaterVolume: sharedObservables.dam$,
     },
     simulationControls: {
       isAutoMode: isAutoMode.value,

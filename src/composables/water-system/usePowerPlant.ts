@@ -1,4 +1,3 @@
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import type { Observable } from 'rxjs';
 import { distinctUntilChanged, filter, map, scan, shareReplay } from 'rxjs/operators';
 
@@ -12,7 +11,6 @@ export function usePowerPlant(dam$: Observable<number>) {
     scan((acc, value) => acc + value, 0), // Accumuler la production d'énergie
     distinctUntilChanged(),
     shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('powerPlant$'),
   );
 
   return {

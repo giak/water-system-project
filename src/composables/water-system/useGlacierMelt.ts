@@ -1,6 +1,5 @@
 import type { WeatherCondition } from '@/types/waterSystem';
 import { handleError } from '@/utils/errorUtils';
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import { type Observable, type Subject, interval, withLatestFrom } from 'rxjs';
 import { catchError, distinctUntilChanged, map, shareReplay, tap } from 'rxjs/operators';
 
@@ -75,8 +74,6 @@ export function useGlacierMelt(
     catchError((error) => handleError(error, 'Simulation de fonte du glacier')),
     // Conserver la dernière valeur émise et permettre des réactivités multiples
     shareReplay(1),
-    // Mesurer les performances de l'observable
-    measureObservablePerformance('glacierMelt$'),
   );
 
   return {

@@ -1,4 +1,3 @@
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import type { Observable } from 'rxjs';
 import { map, scan, shareReplay } from 'rxjs/operators';
 
@@ -14,7 +13,6 @@ export function useWaterDistribution(dam$: Observable<number>) {
     scan((acc, value) => acc + value, 0),
     map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
     shareReplay(1),
-    measureObservablePerformance('waterDistribution$'),
   );
 
   return {

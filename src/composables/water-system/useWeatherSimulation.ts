@@ -1,5 +1,4 @@
 import type { WeatherCondition } from '@/types/waterSystem';
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import { type Observable, interval } from 'rxjs';
 import { distinctUntilChanged, map, shareReplay } from 'rxjs/operators';
 
@@ -12,7 +11,6 @@ export function useWeatherSimulation() {
     }),
     distinctUntilChanged(),
     shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('weatherSimulation$'),
   );
 
   return {

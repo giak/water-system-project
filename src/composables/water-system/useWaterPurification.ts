@@ -1,4 +1,3 @@
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import { type Observable, interval } from 'rxjs';
 import { filter, map, mergeMap, scan, shareReplay, take } from 'rxjs/operators';
 
@@ -17,7 +16,6 @@ export function useWaterPurification(dam$: Observable<number>) {
     ),
     scan((acc, value) => acc + value, 0),
     shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('purificationPlant$'),
   );
 
   return {

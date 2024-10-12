@@ -1,7 +1,6 @@
 import { waterSystemConfig } from '@/config/waterSystemConfig';
 import type { WeatherCondition } from '@/types/waterSystem';
 import { handleError } from '@/utils/errorUtils';
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import type { Observable } from 'rxjs';
 import { BehaviorSubject, combineLatest } from 'rxjs';
 import { catchError, scan, shareReplay } from 'rxjs/operators';
@@ -173,7 +172,6 @@ export function useDamManagement(
       return Math.max(0, Math.min(adjustedLevel, 100));
     }, initialWaterLevel.getValue()),
     catchError((error) => handleError(error, 'Calcul du niveau du barrage')),
-    measureObservablePerformance('dam$'),
     shareReplay(1),
   );
 

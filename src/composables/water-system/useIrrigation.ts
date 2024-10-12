@@ -1,5 +1,4 @@
 import type { WeatherCondition } from '@/types/waterSystem';
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import { type Observable, interval, withLatestFrom } from 'rxjs';
 import { distinctUntilChanged, map, scan, shareReplay } from 'rxjs/operators';
 
@@ -18,7 +17,6 @@ export function useIrrigation(
     scan((acc, value) => acc + value, 0),
     distinctUntilChanged(),
     shareReplay({ bufferSize: 1, refCount: true }),
-    measureObservablePerformance('irrigation$'),
   );
 
   return {

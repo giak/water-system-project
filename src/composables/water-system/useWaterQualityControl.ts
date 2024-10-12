@@ -1,5 +1,4 @@
 import type { WeatherCondition } from '@/types/waterSystem';
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import { type Observable, interval, withLatestFrom } from 'rxjs';
 import { map, shareReplay } from 'rxjs/operators';
 
@@ -16,7 +15,6 @@ export function useWaterQualityControl(
       return Math.max(0, Math.min(100, qualityScore));
     }),
     shareReplay(1),
-    measureObservablePerformance('waterQualityControl$'),
   );
 
   return {

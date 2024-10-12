@@ -1,5 +1,4 @@
 import type { WeatherCondition } from '@/types/waterSystem';
-import { measureObservablePerformance } from '@/utils/performanceUtils';
 import { type Observable, interval, withLatestFrom } from 'rxjs';
 import { map, scan, shareReplay } from 'rxjs/operators';
 
@@ -21,7 +20,7 @@ export function useUserWaterManagement(
     scan((acc, value) => acc + value, 0),
     map((total) => Math.max(0, total - DAILY_RESET_VALUE)),
     shareReplay(1),
-    measureObservablePerformance('userWaterManagement$'),
+    // measureObservablePerformance('userWaterManagement$'),
   );
 
   return {

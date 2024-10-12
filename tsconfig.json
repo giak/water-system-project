@@ -24,7 +24,8 @@
         "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
-        "isolatedModules": true
+        "isolatedModules": true,
+        "verbatimModuleSyntax": true
     },
     "extends": "@vue/tsconfig/tsconfig.dom.json",
     "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],

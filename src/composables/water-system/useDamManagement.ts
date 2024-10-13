@@ -1,6 +1,6 @@
 import { waterSystemConfig } from '@/config/waterSystemConfig';
 import type { WeatherCondition } from '@/types/waterSystem';
-import { handleError } from '@/utils/errorUtils';
+import { handleError } from '@/utils/errorHandler';
 import type { Observable } from 'rxjs';
 import { BehaviorSubject, combineLatest } from 'rxjs';
 import { catchError, scan, shareReplay } from 'rxjs/operators';

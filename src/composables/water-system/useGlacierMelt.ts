@@ -1,5 +1,5 @@
 import type { WeatherCondition } from '@/types/waterSystem';
-import { handleError } from '@/utils/errorUtils';
+import { handleError } from '@/utils/errorHandler';
 import { type Observable, type Subject, interval, withLatestFrom } from 'rxjs';
 import { catchError, distinctUntilChanged, map, shareReplay, tap } from 'rxjs/operators';
 

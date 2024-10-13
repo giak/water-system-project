@@ -46,7 +46,7 @@ import type {
   WaterSystemState,
   WeatherCondition,
 } from '@/types/waterSystem';
-import { handleError } from '@/utils/errorUtils';
+import { handleError, retryStrategy } from '@/utils/errorHandler';
 
 // Imports of local composables
 import {
@@ -74,6 +74,40 @@ type WaterSystemDependencies = {
 
 const WaterSystemDependenciesKey = Symbol('WaterSystemDependencies');
 
+// Définition de types plus stricts
+type WaterLevel = number & { __brand: 'WaterLevel' };
+type WaterQuality = number & { __brand: 'WaterQuality' };
+type FloodRisk = number & { __brand: 'FloodRisk' };
+type GlacierVolume = number & { __brand: 'GlacierVolume' };
+
+// Utilitaire de type pour créer des types nominaux
+type Nominal<T, Brand extends string> = T & { __brand: Brand };
+
+// Utilisation des types nominaux
+type WaterSystemMetrics = {
+  waterLevel: Nominal<number, 'WaterLevel'>;
+  waterQuality: Nominal<number, 'WaterQuality'>;
+  floodRisk: Nominal<number, 'FloodRisk'>;
+  glacierVolume: Nominal<number, 'GlacierVolume'>;
+};
+
+// Enum pour les statuts du système
+enum SystemStatus {
+  Normal = 'Normal',
+  Concerning = 'Préoccupant',
+  Critical = 'Critique',
+}
+
+// Type pour l'état du système
+type SystemState = {
+  overallStatus: SystemStatus;
+  criticalSituation: boolean;
+  glacierStatus: 'Normal' | 'Critique';
+  currentWeather: WeatherCondition;
+  waterLevel: number;
+  waterQuality: number;
+};
+
 // Fonction pure pour calculer le statut global du système
 export function calculateOverallSystemStatus(
   waterLevel: number,
@@ -87,6 +121,33 @@ export function calculateOverallSystemStatus(
     return 'Préoccupant';
   }
   return 'Normal';
+}
+
+// Fonctions pures
+
+export function calculateDamVolume(waterLevel: number, initialDamVolume: number): number {
+  return (waterLevel / 100) * initialDamVolume;
+}
+
+export function isCriticalSituation(
+  waterLevel: number,
+  waterQuality: number,
+  criticalWaterLevel: number,
+  criticalWaterQuality: number
+): boolean {
+  return waterLevel < criticalWaterLevel || waterQuality < criticalWaterQuality;
+}
+
+export function determineGlacierStatus(glacierVolume: number, criticalVolume: number): 'Normal' | 'Critique' {
+  return glacierVolume < criticalVolume ? 'Critique' : 'Normal';
+}
+
+export function calculateSystemEfficiency(purifiedWater: number, totalProcessedWater: number): number {
+  return totalProcessedWater === 0 ? 0 : (purifiedWater / totalProcessedWater) * 100;
+}
+
+export function canSetWaterLevel(isManualMode: boolean): boolean {
+  return isManualMode;
 }
 
 /**
@@ -120,7 +181,7 @@ export function useWaterSystem(
     getCurrentTime: () => Date.now(),
     getRandomNumber: () => Math.random(),
   },
-  config: WaterSystemConfig = waterSystemConfig,
+  config: Readonly<WaterSystemConfig> = waterSystemConfig,
 ): {
   state: ComputedRef<WaterSystemState>;
   observables: WaterSystemObservables;
@@ -139,11 +200,7 @@ export function useWaterSystem(
   waterSourceLogs: Ref<WaterSourceLogEntry[]>;
   waterSourceLog$: Observable<WaterSourceLogEntry>;
   sideEffects$: Observable<void>;
-  systemState$: Observable<{
-    overallStatus: string;
-    criticalSituation: boolean;
-    glacierStatus: string;
-  }>;
+  systemState$: Observable<SystemState>;
   currentSystemState: ComputedRef<WaterSystemState>;
 } {
   provide(WaterSystemDependenciesKey, deps);
@@ -278,7 +335,7 @@ export function useWaterSystem(
 
   /**
    * Simulation du système d'irrigation.
-   * Fournit un Observable de la quantité d'eau utilisée pour l'irrigation en fonction de l'eau purifiée et des conditions météorologiques.
+   * Fournit un Observable de la quantité d'eau utilisée pour l'irrigation en fonction de l'eau purifiée et des conditions métorologiques.
    *
    * @type {Observable<number>}
    */
@@ -393,9 +450,14 @@ export function useWaterSystem(
    * @param {number} level - Le nouveau niveau d'eau à définir
    */
   const setWaterLevel = (level: number): void => {
-    if (isManualMode.value) {
-      manualWaterLevel.value = level;
+    console.log('setWaterLevel appelé avec:', level, 'Mode manuel:', isManualMode.value);
+    if (canSetWaterLevel(isManualMode.value)) {
       state.waterLevel = level;
+      state.damWaterVolume = calculateDamVolume(level, config.INITIAL_DAM_WATER_VOLUME);
+      console.log("Niveau d'eau mis à jour:", state.waterLevel);
+      systemStateSubject.next({...state});
+    } else {
+      console.warn("Tentative de modification du niveau d'eau en mode automatique");
     }
   };
 
@@ -407,7 +469,6 @@ export function useWaterSystem(
     isManualMode.value = !isManualMode.value;
     if (isManualMode.value) {
       stopSimulation();
-      manualWaterLevel.value = state.waterLevel;
     } else {
       startSimulation();
     }
@@ -843,15 +904,7 @@ export function useWaterSystem(
 
   // Utilisation du cache pour systemEfficiency
   const systemEfficiency = computed(() =>
-    getCachedOrCalculate(
-      'systemEfficiency',
-      () => {
-        const processedWater = totalWaterProcessed.value;
-        if (processedWater === 0) return 0;
-        return (state.purifiedWater / processedWater) * 100;
-      },
-      1000, // Cache valide pendant 1 seconde
-    ),
+    calculateSystemEfficiency(state.purifiedWater, totalWaterProcessed.value)
   );
 
   // Nettoyage du cache périodiquement
@@ -899,54 +952,70 @@ export function useWaterSystem(
 
   // Fonction mémoïsée pour calculer l'état global du système
   const calculateSystemState = memoize(
-    (waterLevel: number, waterQuality: number, floodRisk: number, glacierVolume: number) => ({
-      overallStatus: calculateOverallSystemStatus(waterLevel, waterQuality, config),
-      criticalSituation:
-        waterLevel <= config.CRITICAL_WATER_LEVEL ||
-        waterQuality < config.CRITICAL_WATER_QUALITY ||
-        floodRisk > 80,
-      glacierStatus: glacierVolume < 500000 ? 'Critique' : 'Normal',
+    (metrics: WaterSystemMetrics): SystemState => ({
+      overallStatus: calculateOverallSystemStatus(metrics.waterLevel, metrics.waterQuality, config) as SystemStatus,
+      criticalSituation: isCriticalSituation(
+        metrics.waterLevel,
+        metrics.waterQuality,
+        config.CRITICAL_WATER_LEVEL,
+        config.CRITICAL_WATER_QUALITY
+      ),
+      glacierStatus: determineGlacierStatus(metrics.glacierVolume, 500000),
+      currentWeather: state.weatherCondition,
+      waterLevel: metrics.waterLevel,
+      waterQuality: metrics.waterQuality,
     }),
-    (...args) => JSON.stringify(args),
+    (metrics) => JSON.stringify(metrics)
+  );
+
+  // Optimisation des observables RxJS
+  const optimizedDam$ = dam$.pipe(
+    distinctUntilChanged(),
+    retryWhen(retryStrategy()),
+    catchError((error) => handleError(error, 'Optimized Dam Observable')),
+    shareReplay(1),
+  );
+
+  const optimizedWeather$ = weatherSimulation$.pipe(
+    distinctUntilChanged(),
+    retryWhen(retryStrategy()),
+    catchError((error) => handleError(error, 'Optimized Weather Observable')),
+    shareReplay(1),
   );
 
   // Observable de l'état du système optimisé
   const systemState$ = combineLatest({
-    dam: sharedObservables.dam$,
-    weather: sharedObservables.weather$,
-    glacierMelt: sharedObservables.glacierMelt$,
-    waterQuality: sharedObservables.waterQualityControl$,
-    floodRisk: sharedObservables.floodPrediction$,
+    dam: optimizedDam$,
+    weather: optimizedWeather$,
+    glacierMelt: glacierMelt$,
+    waterQuality: waterQualityControl$,
+    floodRisk: floodPrediction$,
   }).pipe(
     map(({ dam, weather, glacierMelt, waterQuality, floodRisk }) => {
-      const newState = {
-        ...systemStateSubject.value,
-        waterLevel: dam,
-        weatherCondition: weather,
-        glacierVolume: glacierMelt.volume,
-        waterQuality,
-        floodRisk,
+      console.log('Nouvelle valeur de dam:', dam);
+      const metrics: WaterSystemMetrics = {
+        waterLevel: dam as WaterLevel,
+        waterQuality: waterQuality as WaterQuality,
+        floodRisk: floodRisk as FloodRisk,
+        glacierVolume: glacierMelt.volume as GlacierVolume,
       };
-      const calculatedState = calculateSystemState(
-        dam,
-        waterQuality,
-        floodRisk,
-        glacierMelt.volume,
-      );
-      systemStateSubject.next({ ...newState, ...calculatedState });
-      return {
-        ...calculatedState,
-        currentWeather: weather, // Ajout de currentWeather
-      };
+      const newState = calculateSystemState(metrics);
+      console.log('Nouvel état calculé:', newState);
+      return newState;
     }),
     distinctUntilChanged((prev, curr) => JSON.stringify(prev) === JSON.stringify(curr)),
+    catchError((error) => handleError(error, 'System State Observable')),
     shareReplay(1),
   );
 
   // Optimisation des effets secondaires
   const sideEffects$ = systemState$.pipe(
     tap((state) => {
-      if (state.criticalSituation) {
+      console.log('Current system state:', state);
+      if (
+        state.waterLevel < config.CRITICAL_WATER_LEVEL ||
+        state.waterQuality < config.CRITICAL_WATER_QUALITY
+      ) {
         console.warn('Situation critique détectée !');
         addAlert('Situation critique détectée !', 'high');
       }
@@ -956,14 +1025,15 @@ export function useWaterSystem(
       }
     }),
     catchError((error) => {
-      console.error('Erreur dans les effets secondaires:', error);
+      console.error('Error in sideEffects$:', error);
+      handleError(error, 'Side Effects');
       addAlert('Erreur système. Vérifiez les logs.', 'high');
       return EMPTY;
     }),
-    map(() => undefined), // Transforme l'Observable en Observable<void>
+    map(() => undefined),
   );
 
-  // Souscrire à sideEffects$
+  // S'assurer que sideEffects$ est souscrit
   sideEffects$.subscribe();
 
   /**
@@ -1029,3 +1099,19 @@ export function createMockWaterSystemDependencies(
     ...overrides,
   };
 }
+
+// Définition d'un type pour la configuration par défaut
+export type DefaultWaterSystemConfig = {
+  readonly CRITICAL_WATER_LEVEL: number;
+  readonly LOW_WATER_LEVEL: number;
+  readonly CRITICAL_WATER_QUALITY: number;
+  // ... (ajoutez ici les autres propriétés de votre configuration)
+};
+
+// Utilisation du type pour la configuration par défaut
+export const defaultWaterSystemConfig: DefaultWaterSystemConfig = {
+  CRITICAL_WATER_LEVEL: 20,
+  LOW_WATER_LEVEL: 30,
+  CRITICAL_WATER_QUALITY: 50,
+  // ... (autres valeurs de configuration)
+};

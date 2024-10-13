@@ -6,22 +6,37 @@
  * @module WaterSystem
  */
 
+import { memoize } from 'lodash-es';
 // Imports from external libraries
-import { Observable, Subject } from 'rxjs';
+import {
+  BehaviorSubject,
+  EMPTY,
+  Observable,
+  Subject,
+  combineLatest,
+  throwError,
+  timer,
+} from 'rxjs';
 import {
   catchError,
+  debounceTime,
   distinctUntilChanged,
   map,
+  mergeMap,
+  retryWhen,
   shareReplay,
+  skip,
+  switchMap,
   take,
   takeUntil,
   tap,
+  throttleTime,
 } from 'rxjs/operators';
 import type { ComputedRef, Ref } from 'vue';
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue';
 
 // Imports from local files
-import { waterSystemConfig } from '@/config/waterSystemConfig';
+import { type WaterSystemConfig, waterSystemConfig } from '@/config/waterSystemConfig';
 import type {
   Alert,
   DataSources,
@@ -51,22 +66,45 @@ import {
   useWeatherSimulation,
 } from './';
 
+// Ajoutez ces types
+type WaterSystemDependencies = {
+  getCurrentTime: () => number;
+  getRandomNumber: () => number;
+};
+
+const WaterSystemDependenciesKey = Symbol('WaterSystemDependencies');
+
+// Fonction pure pour calculer le statut global du système
+export function calculateOverallSystemStatus(
+  waterLevel: number,
+  waterQuality: number,
+  config: WaterSystemConfig,
+): string {
+  if (waterLevel < config.CRITICAL_WATER_LEVEL || waterQuality < config.CRITICAL_WATER_QUALITY) {
+    return 'Critique';
+  }
+  if (waterLevel <= config.LOW_WATER_LEVEL || waterQuality < config.MEDIUM_WATER_QUALITY) {
+    return 'Préoccupant';
+  }
+  return 'Normal';
+}
+
 /**
  * Composable principal pour la gestion du système d'eau.
- * 
+ *
  * @returns Un objet contenant l'état du système, les observables, les contrôles de simulation et diverses fonctions utilitaires.
- * 
+ *
  * @description
  * Ce composable est le cœur du système de gestion de l'eau. Il intègre et coordonne tous les sous-systèmes
  * pour fournir une interface unifiée et réactive du système d'eau dans son ensemble.
- * 
+ *
  * Fonctionnalités principales :
  * - Gestion de l'état global du système d'eau
  * - Coordination des différents sous-systèmes (barrage, purification, distribution, etc.)
  * - Gestion des modes automatique et manuel
  * - Système d'alertes en temps réel
  * - Calculs d'efficacité et de performance du système
- * 
+ *
  * @example
  * const {
  *   state,
@@ -77,7 +115,13 @@ import {
  *   // ... autres propriétés et méthodes
  * } = useWaterSystem();
  */
-export function useWaterSystem(): {
+export function useWaterSystem(
+  deps: WaterSystemDependencies = {
+    getCurrentTime: () => Date.now(),
+    getRandomNumber: () => Math.random(),
+  },
+  config: WaterSystemConfig = waterSystemConfig,
+): {
   state: ComputedRef<WaterSystemState>;
   observables: WaterSystemObservables;
   simulationControls: SimulationControls;
@@ -94,7 +138,16 @@ export function useWaterSystem(): {
   isManualMode: ComputedRef<boolean>;
   waterSourceLogs: Ref<WaterSourceLogEntry[]>;
   waterSourceLog$: Observable<WaterSourceLogEntry>;
+  sideEffects$: Observable<void>;
+  systemState$: Observable<{
+    overallStatus: string;
+    criticalSituation: boolean;
+    glacierStatus: string;
+  }>;
+  currentSystemState: ComputedRef<WaterSystemState>;
 } {
+  provide(WaterSystemDependenciesKey, deps);
+
   /**
    * Subject pour gérer la destruction du composable.
    * Utilisé pour nettoyer les souscriptions lors de la destruction du composable.
@@ -130,22 +183,22 @@ export function useWaterSystem(): {
    * - meltRate : Le taux de fonte du glacier.
    */
   const state = reactive<WaterSystemState>({
-    waterLevel: waterSystemConfig.INITIAL_DAM_WATER_LEVEL,
+    waterLevel: config.INITIAL_DAM_WATER_LEVEL,
     isAutoMode: true,
-    purifiedWater: waterSystemConfig.INITIAL_PURIFIED_WATER,
-    powerGenerated: waterSystemConfig.INITIAL_POWER_GENERATED,
-    waterDistributed: waterSystemConfig.INITIAL_WATER_DISTRIBUTED,
+    purifiedWater: config.INITIAL_PURIFIED_WATER,
+    powerGenerated: config.INITIAL_POWER_GENERATED,
+    waterDistributed: config.INITIAL_WATER_DISTRIBUTED,
     weatherCondition: 'ensoleillé' as WeatherCondition,
     alerts: [],
-    irrigationWater: waterSystemConfig.INITIAL_IRRIGATION_WATER,
-    treatedWastewater: waterSystemConfig.INITIAL_TREATED_WASTEWATER,
-    waterQuality: waterSystemConfig.INITIAL_WATER_QUALITY,
-    floodRisk: waterSystemConfig.INITIAL_FLOOD_RISK,
-    userConsumption: waterSystemConfig.INITIAL_USER_CONSUMPTION,
-    glacierVolume: waterSystemConfig.INITIAL_GLACIER_VOLUME,
-    meltRate: waterSystemConfig.INITIAL_MELT_RATE,
-    waterFlow: waterSystemConfig.INITIAL_WATER_FLOW,
-    damWaterVolume: waterSystemConfig.INITIAL_DAM_WATER_VOLUME,
+    irrigationWater: config.INITIAL_IRRIGATION_WATER,
+    treatedWastewater: config.INITIAL_TREATED_WASTEWATER,
+    waterQuality: config.INITIAL_WATER_QUALITY,
+    floodRisk: config.INITIAL_FLOOD_RISK,
+    userConsumption: config.INITIAL_USER_CONSUMPTION,
+    glacierVolume: config.INITIAL_GLACIER_VOLUME,
+    meltRate: config.INITIAL_MELT_RATE,
+    waterFlow: config.INITIAL_WATER_FLOW,
+    damWaterVolume: config.INITIAL_DAM_WATER_VOLUME,
   });
 
   /**
@@ -205,7 +258,7 @@ export function useWaterSystem(): {
   );
 
   // Initialiser le niveau d'eau du barrage à 70%
-  setInitialWaterLevel(waterSystemConfig.INITIAL_DAM_WATER_LEVEL);
+  setInitialWaterLevel(config.INITIAL_DAM_WATER_LEVEL);
 
   /**
    * Simulation de l'usine de purification de l'eau.
@@ -314,7 +367,7 @@ export function useWaterSystem(): {
    *
    * @type {Ref<number>}
    */
-  const manualWaterLevel = ref(waterSystemConfig.INITIAL_WATER_LEVEL);
+  const manualWaterLevel = ref(config.INITIAL_WATER_LEVEL);
 
   /**
    * Indique si le système est en mode manuel.
@@ -408,23 +461,65 @@ export function useWaterSystem(): {
   // ... (autres sources)
 
   /**
+   * Fonction utilitaire pour gérer les erreurs et les retries
+   * @param error L'erreur à gérer
+   * @param retryCount Le nombre de tentatives actuelles
+   * @param maxRetries Le nombre maximum de tentatives
+   * @param context Le contexte de l'erreur pour le logging
+   */
+  function handleErrorWithRetry(
+    error: unknown,
+    retryCount: number,
+    maxRetries: number,
+    context: string,
+  ) {
+    console.error(`Erreur dans ${context} (tentative ${retryCount}/${maxRetries}):`, error);
+    if (retryCount >= maxRetries) {
+      return throwError(() => new Error(`Erreur maximale atteinte dans ${context}`));
+    }
+    return timer(2 ** retryCount * 1000); // Exponential backoff using ** operator
+  }
+
+  /**
    * Observables partagés pour les différents aspects du système d'eau.
    * L'utilisation de shareReplay(1) permet d'optimiser les performances en évitant
    * les calculs redondants lorsque plusieurs composants s'abonnent au même Observable.
    */
   const sharedObservables = {
     dam$: dam$.pipe(
+      throttleTime(100),
+      distinctUntilChanged(),
+      switchMap((level) =>
+        timer(0, 1000).pipe(
+          map(() => level + (deps.getRandomNumber() - 0.5) * 0.1),
+          takeUntil(dam$.pipe(skip(1))),
+        ),
+      ),
       tap((level) => {
-        if (waterSystemConfig.enableWaterSystemLogs) {
+        if (config.enableWaterSystemLogs) {
           logDam(level, state.weatherCondition, state.waterFlow, state.waterQuality);
         }
       }),
+      retryWhen((errors) =>
+        errors.pipe(mergeMap((error, index) => handleErrorWithRetry(error, index + 1, 5, 'dam$'))),
+      ),
       shareReplay(1),
     ),
-    weather$: weatherSimulation$.pipe(shareReplay(1)),
+    weather$: weatherSimulation$.pipe(
+      debounceTime(500), // Attend 500ms de stabilité avant d'émettre
+      distinctUntilChanged(),
+      shareReplay(1),
+    ),
     glacierMelt$: glacierMelt$.pipe(
+      throttleTime(200),
+      distinctUntilChanged(
+        (prev, curr) =>
+          prev.volume === curr.volume &&
+          prev.meltRate === curr.meltRate &&
+          prev.waterFlow === curr.waterFlow,
+      ),
       tap(({ waterFlow }) => {
-        if (waterSystemConfig.enableWaterSystemLogs) {
+        if (config.enableWaterSystemLogs) {
           logGlacier(state.glacierVolume, state.weatherCondition, waterFlow);
         }
       }),
@@ -456,10 +551,10 @@ export function useWaterSystem(): {
 
   /**
    * Gère les souscriptions aux observables partagés.
-   * 
+   *
    * @param observables - Un objet contenant les observables à souscrire
    * @param updateState - Une fonction pour mettre à jour l'état
-   * 
+   *
    * @description
    * Cette fonction centralise la gestion des souscriptions aux observables partagés.
    * Elle utilise la fonction `optimizedSubscribe` pour chaque observable, ce qui permet
@@ -471,7 +566,14 @@ export function useWaterSystem(): {
     updateState: (key: string, value: unknown) => void,
   ) {
     for (const [key, observable] of Object.entries(observables)) {
-      optimizedSubscribe(observable, (value) => updateState(key, value), `Souscription à ${key}`);
+      optimizedSubscribe(
+        observable.pipe(
+          distinctUntilChanged(), // Ajout d'un distinctUntilChanged() supplémentaire
+          debounceTime(50), // Petit debounce pour regrouper les mises à jour rapides
+        ),
+        (value) => updateState(key, value),
+        `Souscription à ${key}`,
+      );
     }
   }
 
@@ -522,9 +624,9 @@ export function useWaterSystem(): {
       case 'waterDistribution$': {
         const distributionValue = value as number;
         state.waterDistributed = distributionValue;
-        if (distributionValue < waterSystemConfig.LOW_WATER_DISTRIBUTION) {
+        if (distributionValue < config.LOW_WATER_DISTRIBUTION) {
           addAlert("Distribution d'eau faible", 'medium');
-        } else if (distributionValue > waterSystemConfig.HIGH_WATER_DISTRIBUTION) {
+        } else if (distributionValue > config.HIGH_WATER_DISTRIBUTION) {
           addAlert("Distribution d'eau élevée", 'low');
         }
         break;
@@ -568,42 +670,41 @@ export function useWaterSystem(): {
     destroy$.complete();
 
     // Réinitialiser tous les états réactifs à leurs valeurs initiales
-    state.waterLevel = waterSystemConfig.INITIAL_DAM_WATER_LEVEL;
+    state.waterLevel = config.INITIAL_DAM_WATER_LEVEL;
     state.isAutoMode = true;
-    state.purifiedWater = waterSystemConfig.INITIAL_PURIFIED_WATER;
-    state.powerGenerated = waterSystemConfig.INITIAL_POWER_GENERATED;
-    state.waterDistributed = waterSystemConfig.INITIAL_WATER_DISTRIBUTED;
+    state.purifiedWater = config.INITIAL_PURIFIED_WATER;
+    state.powerGenerated = config.INITIAL_POWER_GENERATED;
+    state.waterDistributed = config.INITIAL_WATER_DISTRIBUTED;
     state.weatherCondition = 'ensoleillé' as WeatherCondition;
     state.alerts = [];
-    state.irrigationWater = waterSystemConfig.INITIAL_IRRIGATION_WATER;
-    state.treatedWastewater = waterSystemConfig.INITIAL_TREATED_WASTEWATER;
-    state.waterQuality = waterSystemConfig.INITIAL_WATER_QUALITY;
-    state.floodRisk = waterSystemConfig.INITIAL_FLOOD_RISK;
-    state.userConsumption = waterSystemConfig.INITIAL_USER_CONSUMPTION;
-    state.glacierVolume = waterSystemConfig.INITIAL_GLACIER_VOLUME;
-    state.meltRate = waterSystemConfig.INITIAL_MELT_RATE;
-    state.waterFlow = waterSystemConfig.INITIAL_WATER_FLOW;
-    state.damWaterVolume = waterSystemConfig.INITIAL_DAM_WATER_VOLUME;
+    state.irrigationWater = config.INITIAL_IRRIGATION_WATER;
+    state.treatedWastewater = config.INITIAL_TREATED_WASTEWATER;
+    state.waterQuality = config.INITIAL_WATER_QUALITY;
+    state.floodRisk = config.INITIAL_FLOOD_RISK;
+    state.userConsumption = config.INITIAL_USER_CONSUMPTION;
+    state.glacierVolume = config.INITIAL_GLACIER_VOLUME;
+    state.meltRate = config.INITIAL_MELT_RATE;
+    state.waterFlow = config.INITIAL_WATER_FLOW;
+    state.damWaterVolume = config.INITIAL_DAM_WATER_VOLUME;
 
     // Réinitialiser le niveau d'eau du barrage à 70%
-    setInitialWaterLevel(waterSystemConfig.INITIAL_DAM_WATER_LEVEL);
+    setInitialWaterLevel(config.INITIAL_DAM_WATER_LEVEL);
 
     // Réinitialiser toutes les sources de données
-    dataSources.waterSource$.next(waterSystemConfig.INITIAL_WATER_LEVEL);
+    dataSources.waterSource$.next(config.INITIAL_WATER_LEVEL);
     dataSources.weatherSource$.next('ensoleillé');
-    dataSources.wastewaterSource$.next(waterSystemConfig.INITIAL_TREATED_WASTEWATER);
-    dataSources.userConsumptionSource$.next(waterSystemConfig.INITIAL_USER_CONSUMPTION);
-    dataSources.glacierSource$.next(waterSystemConfig.INITIAL_GLACIER_VOLUME);
+    dataSources.wastewaterSource$.next(config.INITIAL_TREATED_WASTEWATER);
+    dataSources.userConsumptionSource$.next(config.INITIAL_USER_CONSUMPTION);
+    dataSources.glacierSource$.next(config.INITIAL_GLACIER_VOLUME);
 
     // Forcer une mise à jour immédiate
     const baseWaterInput =
-      waterSystemConfig.BASE_WATER_INPUT_MIN +
-      Math.random() *
-        (waterSystemConfig.BASE_WATER_INPUT_MAX - waterSystemConfig.BASE_WATER_INPUT_MIN);
+      config.INITIAL_WATER_LEVEL +
+      deps.getRandomNumber() * (config.HIGH_WATER_LEVEL - config.LOW_WATER_LEVEL);
     const seasonalFactor =
       1 +
-      waterSystemConfig.SEASONAL_FACTOR_AMPLITUDE *
-        Math.sin(Date.now() / waterSystemConfig.SEASONAL_FACTOR_PERIOD);
+      0.3 * // Utiliser une valeur fixe au lieu de SEASONAL_FACTOR_AMPLITUDE
+        Math.sin(deps.getCurrentTime() / (1000 * 60 * 60 * 24 * 30)); // 30 jours en millisecondes
     dataSources.waterSource$.next(baseWaterInput * seasonalFactor);
     dataSources.glacierSource$.next(state.glacierVolume);
     weatherSimulation$.pipe(take(1)).subscribe((weather) => {
@@ -697,6 +798,7 @@ export function useWaterSystem(): {
     destroy$.next();
     destroy$.complete();
     stopSimulation();
+    sideEffects$.subscribe().unsubscribe();
   });
 
   /**
@@ -707,12 +809,12 @@ export function useWaterSystem(): {
 
   /**
    * Fonction pour obtenir une valeur du cache ou la calculer si elle n'existe pas.
-   * 
+   *
    * @param key - La clé du calcul
    * @param calculationFn - La fonction de calcul
    * @param maxAge - La durée de vie maximale du résultat en millisecondes
    * @returns Le résultat du calcul, soit depuis le cache, soit nouvellement calculé
-   * 
+   *
    * @description
    * Cette fonction implémente un mécanisme de cache simple pour les calculs coûteux.
    * Elle vérifie d'abord si un résultat valide existe dans le cache. Si c'est le cas,
@@ -720,7 +822,7 @@ export function useWaterSystem(): {
    * résultat dans le cache, et retourne le résultat.
    */
   function getCachedOrCalculate<T>(key: string, calculationFn: () => T, maxAge: number): T {
-    const now = Date.now();
+    const now = deps.getCurrentTime();
     const cached = calculationCache.get(key);
     if (cached && now - cached.timestamp < maxAge) {
       return cached.value as T;
@@ -770,6 +872,7 @@ export function useWaterSystem(): {
     destroy$.complete();
     stopSimulation();
     calculationCache.clear();
+    sideEffects$.subscribe().unsubscribe();
   });
 
   /**
@@ -779,29 +882,89 @@ export function useWaterSystem(): {
    * Cette constante est une référence à un objet qui représente l'état actuel du système d'eau.
    * Elle est initialisée avec les valeurs par défaut définies dans waterSystemConfig.
    */
-  const overallSystemStatus = computed(() => {
-    if (
-      state.waterLevel < waterSystemConfig.CRITICAL_WATER_LEVEL ||
-      state.waterQuality < waterSystemConfig.CRITICAL_WATER_QUALITY
-    ) {
-      return 'Critique';
-    }
-    if (
-      state.waterLevel < waterSystemConfig.LOW_WATER_LEVEL ||
-      state.waterQuality < waterSystemConfig.MEDIUM_WATER_QUALITY
-    ) {
-      return 'Préoccupant';
-    }
-    return 'Normal';
-  });
+  const overallSystemStatus = computed(() =>
+    calculateOverallSystemStatus(state.waterLevel, state.waterQuality, config),
+  );
 
   // Mettez à jour le volume d'eau du barrage chaque fois que le niveau d'eau change
   watch(
     () => state.waterLevel,
     (newWaterLevel) => {
-      state.damWaterVolume = (newWaterLevel / 100) * waterSystemConfig.INITIAL_DAM_WATER_VOLUME;
+      state.damWaterVolume = (newWaterLevel / 100) * config.INITIAL_DAM_WATER_VOLUME;
     },
   );
+
+  // Utilisation de BehaviorSubject pour l'état du système
+  const systemStateSubject = new BehaviorSubject<WaterSystemState>(state);
+
+  // Fonction mémoïsée pour calculer l'état global du système
+  const calculateSystemState = memoize(
+    (waterLevel: number, waterQuality: number, floodRisk: number, glacierVolume: number) => ({
+      overallStatus: calculateOverallSystemStatus(waterLevel, waterQuality, config),
+      criticalSituation:
+        waterLevel <= config.CRITICAL_WATER_LEVEL ||
+        waterQuality < config.CRITICAL_WATER_QUALITY ||
+        floodRisk > 80,
+      glacierStatus: glacierVolume < 500000 ? 'Critique' : 'Normal',
+    }),
+    (...args) => JSON.stringify(args),
+  );
+
+  // Observable de l'état du système optimisé
+  const systemState$ = combineLatest({
+    dam: sharedObservables.dam$,
+    weather: sharedObservables.weather$,
+    glacierMelt: sharedObservables.glacierMelt$,
+    waterQuality: sharedObservables.waterQualityControl$,
+    floodRisk: sharedObservables.floodPrediction$,
+  }).pipe(
+    map(({ dam, weather, glacierMelt, waterQuality, floodRisk }) => {
+      const newState = {
+        ...systemStateSubject.value,
+        waterLevel: dam,
+        weatherCondition: weather,
+        glacierVolume: glacierMelt.volume,
+        waterQuality,
+        floodRisk,
+      };
+      const calculatedState = calculateSystemState(
+        dam,
+        waterQuality,
+        floodRisk,
+        glacierMelt.volume,
+      );
+      systemStateSubject.next({ ...newState, ...calculatedState });
+      return {
+        ...calculatedState,
+        currentWeather: weather, // Ajout de currentWeather
+      };
+    }),
+    distinctUntilChanged((prev, curr) => JSON.stringify(prev) === JSON.stringify(curr)),
+    shareReplay(1),
+  );
+
+  // Optimisation des effets secondaires
+  const sideEffects$ = systemState$.pipe(
+    tap((state) => {
+      if (state.criticalSituation) {
+        console.warn('Situation critique détectée !');
+        addAlert('Situation critique détectée !', 'high');
+      }
+      if (state.glacierStatus === 'Critique') {
+        console.warn('Volume du glacier critique !');
+        addAlert('Volume du glacier critique !', 'medium');
+      }
+    }),
+    catchError((error) => {
+      console.error('Erreur dans les effets secondaires:', error);
+      addAlert('Erreur système. Vérifiez les logs.', 'high');
+      return EMPTY;
+    }),
+    map(() => undefined), // Transforme l'Observable en Observable<void>
+  );
+
+  // Souscrire à sideEffects$
+  sideEffects$.subscribe();
 
   /**
    * Retourner les données du système d'eau.
@@ -850,5 +1013,19 @@ export function useWaterSystem(): {
     toggleAutoMode,
     waterSourceLogs,
     waterSourceLog$,
+    sideEffects$,
+    systemState$,
+    currentSystemState: computed(() => systemStateSubject.value),
+  };
+}
+
+// Fonction d'aide pour les tests
+export function createMockWaterSystemDependencies(
+  overrides: Partial<WaterSystemDependencies> = {},
+): WaterSystemDependencies {
+  return {
+    getCurrentTime: () => 1000,
+    getRandomNumber: () => 0.5,
+    ...overrides,
   };
 }
